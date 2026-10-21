@@ -57,14 +57,14 @@ visudo -cf /etc/sudoers.d/nja-deploy
 
 O script e o Compose ficam fora da pasta atualizável do projeto para que apenas o administrador possa alterá-los.
 
-Antes do primeiro deploy, confirme que o contêiner atual consegue gravar no diretório de backup:
+Antes do primeiro deploy, confirme que o diretório de backup e o arquivo de ambiente continuam presentes:
 
 ```bash
-container_web=$(docker ps --filter 'label=com.docker.compose.project=nja-system' --filter 'label=com.docker.compose.service=web' --format '{{.ID}}' | head -n 1)
-test -n "$container_web" && docker exec "$container_web" sh -c 'test -w /var/backups/nja'
+test -d /www/backup/nja
+test -f /www/wwwroot/nja-system/.env
 ```
 
-O comando deve terminar sem mensagem e com código zero. Se falhar, não execute o workflow ainda: confira se o `compose.override.yaml` atual monta `/www/backup/nja:/var/backups/nja` no serviço `web` e recrie o contêiner com essa configuração.
+Os comandos devem terminar sem mensagem e com código zero. No primeiro deploy, o script cria o backup dentro do contêiner antigo e o copia para `/www/backup/nja`. A imagem de produção passa então a montar esse diretório diretamente em `/var/backups/nja`.
 
 ## 5. Cadastrar os segredos no GitHub
 

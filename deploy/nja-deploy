@@ -63,8 +63,17 @@ if [[ -z "$previous_image" ]]; then
 fi
 
 backup_name="pre-deploy-$(date -u +%Y%m%d-%H%M%S)-${release:0:12}"
+backup_in_container="/tmp/$backup_name"
+backup_on_host="$BACKUP_DIR/$backup_name"
+if [[ -e "$backup_on_host" ]]; then
+  echo "O destino do backup já existe: $backup_on_host" >&2
+  exit 4
+fi
 echo "Criando backup $backup_name..."
-docker exec "$current_web" python manage.py backup --output "/var/backups/nja/$backup_name"
+docker exec "$current_web" python manage.py backup --output "$backup_in_container"
+docker cp "$current_web:$backup_in_container" "$backup_on_host"
+test -s "$backup_on_host/nja.sqlite3"
+docker exec "$current_web" rm -rf -- "$backup_in_container"
 
 echo "Carregando imagem nja-system:$release..."
 gzip -dc "$archive" | docker load

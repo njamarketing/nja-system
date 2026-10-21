@@ -1,0 +1,18 @@
+services:
+  web:
+    build: .
+    env_file: .env
+    volumes:
+      - nja-data:/var/lib/nja
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+  scheduler:
+    build: .
+    env_file: .env
+    command: ["python", "scheduler.py"]
+    volumes:
+      - nja-data:/var/lib/nja
+    restart: unless-stopped
+volumes:
+  nja-data:

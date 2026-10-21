@@ -1,0 +1,5 @@
+gunicorn>=23,<24
+pywebpush>=2,<3
+Pillow>=11,<13
+tzdata>=2025.1
+cryptography>=44,<48

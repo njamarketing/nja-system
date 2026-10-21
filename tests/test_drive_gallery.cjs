@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/../static/enterprise.js','utf8');
+const section=source.slice(source.indexOf('let driveThumbObserver='),source.indexOf('async function renderDrive()'));
+const values=new Map(),sandbox={state:{user:{id:'alice'}},localStorage:{getItem:k=>values.get(k)},esc:s=>String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;'),fmt:s=>s,encodeURIComponent};
+vm.createContext(sandbox);vm.runInContext(section,sandbox);
+assert.equal(vm.runInContext('driveGetView()',sandbox),'grid');values.set('nja-drive-view:alice','list');assert.equal(vm.runInContext('driveGetView()',sandbox),'list');sandbox.state.user.id='bob';assert.equal(vm.runInContext('driveGetView()',sandbox),'grid');
+sandbox.file={id:'file1',name:'<img onerror=alert(1)>',mimeType:'image/jpeg',hasThumbnail:true};
+let html=vm.runInContext("driveFileCard(file,'grid')",sandbox);assert.ok(html.includes('data-drive-thumb="file1"'));assert.ok(!html.includes('<img onerror='));assert.ok(html.includes('rel="noopener"'));
+html=vm.runInContext("driveFileCard(file,'list')",sandbox);assert.ok(!html.includes('data-drive-thumb'));
+sandbox.file.mimeType='application/vnd.google-apps.folder';html=vm.runInContext("driveFileCard(file,'grid')",sandbox);assert.ok(html.includes('data-drive-folder'));assert.ok(!html.includes('data-drive-thumb'));assert.ok(html.startsWith('<button'));
+console.log('OK: grid/list, per-user preference, safe file cards, folder navigation.');

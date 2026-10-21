@@ -1,0 +1,41 @@
+@echo off
+rem Copie para configuracao-local.bat. Nao compartilhe esse arquivo preenchido.
+rem Preencha apenas as integracoes que usar. As chaves ficam no servidor.
+set "OPENAI_API_KEY="
+set "OPENAI_PROJECT="
+set "OPENAI_MODEL=gpt-5-mini"
+set "OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe"
+set "NJA_AI_DAILY_LIMIT=300"
+set "NJA_AI_USER_DAILY_LIMIT=30"
+set "GOOGLE_CLIENT_ID="
+set "GOOGLE_CLIENT_SECRET="
+set "GOOGLE_WORKSPACE_DOMAIN="
+set "GOOGLE_DRIVE_ROOT_ID="
+rem Opcional: NJA_ICE_SERVERS com JSON de servidores STUN/TURN.
+rem Padrao local: NJA_ORIGIN=http://localhost:8000
+rem Recuperacao por e-mail. Preencha com os dados SMTP fornecidos pela empresa.
+set "SMTP_HOST="
+set "SMTP_PORT=587"
+set "SMTP_SECURITY=starttls"
+set "SMTP_FROM="
+set "SMTP_USER="
+set "SMTP_PASSWORD="
+
+rem Clima do mini ninja (OpenWeather)
+set "OPENWEATHER_API_KEY="
+
+REM NJA 1.8 - preencha somente no arquivo local, nunca compartilhe credenciais
+set "CORA_ENV=stage"
+set "CORA_CLIENT_ID="
+set "CORA_CERT_PATH="
+set "CORA_KEY_PATH="
+set "META_GRAPH_VERSION="
+set "META_ACCESS_TOKEN="
+set "META_PAGE_ACCESS_TOKEN="
+set "META_PAGE_ID="
+set "META_INSTAGRAM_ID="
+set "META_AD_ACCOUNT_ID="
+set "WHATSAPP_TOKEN="
+set "WHATSAPP_PHONE_ID="
+set "WHATSAPP_VERIFY_TOKEN="
+set "META_APP_SECRET="

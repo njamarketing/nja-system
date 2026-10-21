@@ -1,11 +1,13 @@
-import unittest,os
+import unittest,os,gc
 from unittest.mock import patch
 from datetime import datetime,timedelta,timezone
 import test_system as base
 import app,agency_editorial
 class EditorialTest(unittest.TestCase):
  setUp=base.SystemTest.setUp
- tearDown=base.SystemTest.tearDown
+ def tearDown(self):
+  gc.collect()  # Release SQLite connections before removing the database on Windows.
+  base.SystemTest.tearDown(self)
  call=base.SystemTest.call
  def draft(self):
   cid=self.call('/api/clients','POST',{'name':'Editorial','entered':'2026-10-01','product':'Marketing'})[1]['id']
@@ -38,3 +40,47 @@ class EditorialTest(unittest.TestCase):
   with app.connect() as c:c.execute("UPDATE creative_reviews SET status='approved'");c.execute('UPDATE social_accounts SET verified=?',(app.now(),));c.execute("UPDATE editorial_posts SET status='scheduled',scheduled=?",(app.now(),))
   with patch.object(agency_editorial,'graph',side_effect=TimeoutError()) as graph:agency_editorial.tick(app);agency_editorial.tick(app);self.assertEqual(graph.call_count,1)
   self.assertEqual(self.call('/api/agency/editorial')[1]['posts'][0]['status'],'unknown')
+ def test_edit_account_fields_and_preserve_token(self):
+  cid,aid,*_=self.draft();url='/api/agency/editorial/accounts/'+aid
+  with app.connect() as c:
+   before=c.execute('SELECT secret FROM social_accounts WHERE id=?',(aid,)).fetchone()[0]
+   c.execute('UPDATE social_accounts SET verified=? WHERE id=?',(app.now(),aid))
+  self.assertEqual(self.call(url,'PATCH',{'name':'Nova conta','platform':'instagram','target':'456','active':False,'client_id':cid})[0],200)
+  data=self.call('/api/agency/editorial')[1];acc=data['accounts'][0]
+  self.assertEqual((acc['name'],acc['platform'],acc['target'],acc['active']),('Nova conta','instagram','456',0))
+  self.assertIsNone(acc['verified']);self.assertEqual(data['posts'][0]['status'],'cancelled')
+  with app.connect() as c:self.assertEqual(c.execute('SELECT secret FROM social_accounts WHERE id=?',(aid,)).fetchone()[0],before)
+  self.assertEqual(self.call(url,'PATCH',{'token':'new-secret','active':True})[0],200)
+  with app.connect() as c:self.assertNotEqual(c.execute('SELECT secret FROM social_accounts WHERE id=?',(aid,)).fetchone()[0],before)
+ def test_delete_account_cancels_queue_preserves_history(self):
+  cid,aid,*_,pid=self.draft();url='/api/agency/editorial/accounts/'+aid
+  self.assertEqual(self.call(url,'DELETE',who='bob')[0],403)
+  with app.connect() as c:c.execute("UPDATE editorial_posts SET status='scheduled' WHERE id=?",(pid,))
+  self.assertEqual(self.call(url,'DELETE')[0],200)
+  data=self.call('/api/agency/editorial')[1];self.assertEqual(data['accounts'],[])
+  self.assertEqual(data['posts'][0]['status'],'cancelled');self.assertTrue(data['posts'][0]['account_name'])
+  with app.connect() as c:
+   acc=c.execute('SELECT * FROM social_accounts WHERE id=?',(aid,)).fetchone()
+   self.assertEqual(acc['secret'],'');self.assertEqual(acc['active'],0)
+  self.assertEqual(self.call(url,'PATCH',{'active':True})[0],404)
+  self.assertEqual(self.call(url+'/verify','POST')[0],404)
+  with patch.object(agency_editorial,'graph') as graph:agency_editorial.tick(app);graph.assert_not_called()
+ def test_invalid_edits_and_inflight_delete_are_rejected(self):
+  cid,aid,*_,pid=self.draft();url='/api/agency/editorial/accounts/'+aid
+  for payload in [{'name':''},{'target':'abc'},{'platform':'ads'},{'active':'yes'},{'token':''}]:
+   self.assertEqual(self.call(url,'PATCH',payload)[0],400)
+  self.assertEqual(self.call(url,'PATCH',{'name':'Forbidden'},who='bob')[0],403)
+  for status in ['processing','sending','unknown']:
+   with app.connect() as c:c.execute('UPDATE editorial_posts SET status=? WHERE id=?',(status,pid))
+   self.assertEqual(self.call(url,'DELETE')[0],409)
+   self.assertEqual(self.call(url,'PATCH',{'target':'789'})[0],409)
+  with app.connect() as c:c.execute("UPDATE editorial_posts SET status='published',external_id='published123' WHERE id=?",(pid,))
+  self.assertEqual(self.call(url,'DELETE')[0],200)
+  self.assertEqual(self.call('/api/agency/editorial')[1]['posts'][0]['status'],'published')
+ def test_change_client_requires_access_and_no_history(self):
+  cid,aid,*_=self.draft();url='/api/agency/editorial/accounts/'+aid
+  other=self.call('/api/clients','POST',{'name':'Outro','entered':'2026-10-01','product':'Marketing'})[1]['id']
+  self.assertEqual(self.call(url,'PATCH',{'client_id':'missing'})[0],404)
+  self.assertEqual(self.call(url,'PATCH',{'client_id':other})[0],409)
+  fresh=self.call('/api/agency/editorial/accounts','POST',{'client_id':cid,'name':'Nova','platform':'facebook','target':'555','token':'secret'})[1]['id']
+  self.assertEqual(self.call('/api/agency/editorial/accounts/'+fresh,'PATCH',{'client_id':other})[0],200)

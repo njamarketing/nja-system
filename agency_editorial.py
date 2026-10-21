@@ -10,6 +10,8 @@ def init(c):
  CREATE TABLE IF NOT EXISTS editorial_media(token TEXT PRIMARY KEY,post_id TEXT NOT NULL REFERENCES editorial_posts(id),file_id TEXT NOT NULL REFERENCES files(id),expires REAL NOT NULL);
  CREATE TABLE IF NOT EXISTS creative_assets(version_id TEXT NOT NULL REFERENCES creative_versions(id),file_id TEXT NOT NULL REFERENCES files(id),position INTEGER NOT NULL,PRIMARY KEY(version_id,file_id));''')
 
+ if 'deleted' not in [r[1] for r in c.execute('PRAGMA table_info(social_accounts)')]:c.execute('ALTER TABLE social_accounts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
+
 def assets(c,v):
  rows=c.execute('SELECT f.* FROM creative_assets x JOIN files f ON f.id=x.file_id WHERE x.version_id=? ORDER BY x.position',(v['id'],)).fetchall()
  return rows or ([c.execute('SELECT * FROM files WHERE id=?',(v['file_id'],)).fetchone()] if v['file_id'] else [])
@@ -34,7 +36,7 @@ def approved(a,c,p):
 
 def account(a,c,u,id):
  r=c.execute('SELECT * FROM social_accounts WHERE id=?',(id,)).fetchone()
- if not r:raise a.Error(404,'Conta não encontrada.')
+ if not r or r['deleted']:raise a.Error(404,'Conta não encontrada.')
  scope.need(a,c,u,r['client_id']);return r
 
 def graph(a,acc,route,body=None,query=None):
@@ -49,7 +51,7 @@ def api(a,c,u,method,path,d,q):
  if not path.startswith('/api/agency/editorial'):return None
  a.need(u,'editorial');parts=path.split('/')[4:]
  if not parts and method=='GET':
-  return {'accounts':[dict(r) for r in c.execute("SELECT id,client_id,name,platform,target,active,verified FROM social_accounts WHERE platform<>'ads'") if scope.allowed(c,u,r['client_id'])],'posts':[dict(r) for r in c.execute('SELECT * FROM editorial_posts ORDER BY scheduled') if scope.allowed(c,u,r['client_id'])],'reviews':[{'id':r['id'],'client_id':r['client_id'],'title':r['title'],'version_id':r['current_version'],'status':r['status']} for r in c.execute('SELECT * FROM creative_reviews') if scope.allowed(c,u,r['client_id'])]}
+  return {'accounts':[dict(r) for r in c.execute("SELECT id,client_id,name,platform,target,active,verified FROM social_accounts WHERE platform<>'ads' AND deleted=0") if scope.allowed(c,u,r['client_id'])],'posts':[dict(r) for r in c.execute('SELECT p.*,s.name AS account_name FROM editorial_posts p JOIN social_accounts s ON s.id=p.account_id ORDER BY p.scheduled') if scope.allowed(c,u,r['client_id'])],'reviews':[{'id':r['id'],'client_id':r['client_id'],'title':r['title'],'version_id':r['current_version'],'status':r['status']} for r in c.execute('SELECT * FROM creative_reviews') if scope.allowed(c,u,r['client_id'])]}
  a.need(u,'editorial_manage')
  if parts and parts[0]=='accounts':
   a.need(u,'integrations_manage')
@@ -57,16 +59,33 @@ def api(a,c,u,method,path,d,q):
    cid=d.get('client_id');scope.need(a,c,u,cid);platform=d.get('platform');target=a.textfield(d,'target',True,100);token=a.textfield(d,'token',True,4000)
    if platform not in ['instagram','facebook'] or not re.fullmatch(r'\d+',target):raise a.Error(400,'Plataforma ou ID inválido.')
    id=a.uid();c.execute('INSERT INTO social_accounts(id,client_id,name,platform,target,secret,created) VALUES(?,?,?,?,?,?,?)',(id,cid,a.textfield(d,'name',True,120),platform,target,integrations.cipher(a).encrypt(token.encode()).decode(),a.now()));a.audit(c,u,'social_account',id);return {'id':id}
+  if len(parts)<2:raise a.Error(404,'Ação editorial não encontrada.')
+  if method in ['PATCH','DELETE'] and len(parts)==2 and not c.in_transaction:c.execute('BEGIN IMMEDIATE')
   acc=account(a,c,u,parts[1]);id=acc['id']
+  if acc['platform'] not in ['instagram','facebook']:raise a.Error(404,'Conta editorial não encontrada.')
   if len(parts)==3 and parts[2]=='verify' and method=='POST':
    result=graph(a,acc,acc['target'],query={'fields':'id'} )
    if str(result.get('id'))!=acc['target']:raise a.Error(409,'A credencial não confirmou a conta selecionada.')
    c.execute('UPDATE social_accounts SET verified=? WHERE id=?',(a.now(),id));a.audit(c,u,'social_verified',id);return {'ok':True}
-  if method=='PATCH':
-   if 'token' in d:c.execute('UPDATE social_accounts SET secret=?,verified=NULL WHERE id=?',(integrations.cipher(a).encrypt(a.textfield(d,'token',True,4000).encode()).decode(),id))
-   if 'active' in d:
-    if not isinstance(d['active'],bool):raise a.Error(400,'Estado inválido.')
-    c.execute('UPDATE social_accounts SET active=? WHERE id=?',(int(d['active']),id))
+  if len(parts)==2 and method=='DELETE':
+   if c.execute("SELECT 1 FROM editorial_posts WHERE account_id=? AND status IN ('processing','sending','unknown')",(id,)).fetchone():raise a.Error(409,'Há uma publicação em processamento ou sem confirmação. Confira seu estado na Meta antes de apagar a conta.')
+   c.execute("DELETE FROM editorial_media WHERE post_id IN (SELECT id FROM editorial_posts WHERE account_id=? AND status IN ('draft','scheduled','blocked'))",(id,))
+   c.execute("UPDATE editorial_posts SET status='cancelled',updated=? WHERE account_id=? AND status IN ('draft','scheduled','blocked')",(a.now(),id))
+   c.execute("UPDATE social_accounts SET deleted=1,active=0,secret='',verified=NULL WHERE id=?",(id,));a.audit(c,u,'social_account_delete',id);return {'ok':True}
+  if len(parts)==2 and method=='PATCH':
+   cid=d.get('client_id',acc['client_id']);scope.need(a,c,u,cid)
+   name=a.textfield(d,'name',True,120) if 'name' in d else acc['name']
+   platform=d.get('platform',acc['platform']);target=a.textfield(d,'target',True,100) if 'target' in d else acc['target']
+   if platform not in ['instagram','facebook'] or not re.fullmatch(r'\d+',target):raise a.Error(400,'Plataforma ou ID inválido.')
+   active=d.get('active',bool(acc['active']))
+   if not isinstance(active,bool):raise a.Error(400,'Estado inválido.')
+   changed=cid!=acc['client_id'] or platform!=acc['platform'] or target!=acc['target']
+   if cid!=acc['client_id'] and c.execute('SELECT 1 FROM editorial_posts WHERE account_id=?',(id,)).fetchone():raise a.Error(409,'Esta conta possui publicações vinculadas. Cadastre outra conta para o novo cliente para preservar o histórico.')
+   if (changed or 'token' in d or not active) and c.execute("SELECT 1 FROM editorial_posts WHERE account_id=? AND status IN ('processing','sending','unknown')",(id,)).fetchone():raise a.Error(409,'Confira a publicação em processamento ou sem confirmação na Meta antes de alterar a conexão da conta.')
+   secret=integrations.cipher(a).encrypt(a.textfield(d,'token',True,4000).encode()).decode() if 'token' in d else acc['secret']
+   if changed:
+    c.execute("UPDATE editorial_posts SET status='cancelled',updated=? WHERE account_id=? AND status IN ('draft','scheduled','blocked')",(a.now(),id))
+   c.execute('UPDATE social_accounts SET client_id=?,name=?,platform=?,target=?,secret=?,active=?,verified=? WHERE id=?',(cid,name,platform,target,secret,int(active),None if changed or 'token' in d else acc['verified'],id))
    a.audit(c,u,'social_account_update',id);return {'ok':True}
  if parts and parts[0]=='posts':
   if len(parts)==1 and method=='POST':

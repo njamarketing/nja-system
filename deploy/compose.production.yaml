@@ -1,0 +1,36 @@
+services:
+  web:
+    image: ${NJA_IMAGE:?NJA_IMAGE não definida}
+    env_file:
+      - /www/wwwroot/nja-system/.env
+    volumes:
+      - nja-data:/var/lib/nja
+      - /www/backup/nja:/var/backups/nja
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/', timeout=5)"
+      interval: 10s
+      timeout: 6s
+      retries: 6
+      start_period: 20s
+
+  scheduler:
+    image: ${NJA_IMAGE:?NJA_IMAGE não definida}
+    env_file:
+      - /www/wwwroot/nja-system/.env
+    command:
+      - python
+      - scheduler.py
+    volumes:
+      - nja-data:/var/lib/nja
+      - /www/backup/nja:/var/backups/nja
+    restart: unless-stopped
+
+volumes:
+  nja-data:

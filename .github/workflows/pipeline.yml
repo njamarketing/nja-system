@@ -1,0 +1,163 @@
+name: NJA System pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ (startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch') && 'nja-production' || format('nja-ci-{0}', github.ref) }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Testes Python e JavaScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Instalar dependências Python
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Executar testes Python
+        run: python -W ignore::ResourceWarning -m unittest discover -s tests -p 'test_*.py' -q
+
+      - name: Preparar Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "24"
+          package-manager-cache: false
+
+      - name: Executar testes JavaScript
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for test_file in tests/*.cjs; do
+            node "$test_file"
+          done
+
+  deploy:
+    name: Publicar em produção
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: production
+    env:
+      DEPLOY_HOST: ${{ secrets.PROD_HOST }}
+      DEPLOY_PORT: ${{ secrets.PROD_PORT || '22' }}
+      DEPLOY_USER: nja-deploy
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      IMAGE_NAME: nja-system
+      IMAGE_PLATFORM: ${{ vars.PROD_PLATFORM || 'linux/amd64' }}
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Validar configuração de produção
+        env:
+          DEPLOY_KEY: ${{ secrets.PROD_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -n "$DEPLOY_HOST"
+          test -n "$DEPLOY_PORT"
+          test -n "$DEPLOY_KEY"
+          test -n "$DEPLOY_KNOWN_HOSTS"
+          case "$IMAGE_PLATFORM" in
+            linux/amd64|linux/arm64) ;;
+            *) echo "PROD_PLATFORM inválida: $IMAGE_PLATFORM" >&2; exit 1 ;;
+          esac
+          git fetch origin "$DEFAULT_BRANCH"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$DEFAULT_BRANCH"; then
+            echo "A release precisa pertencer à branch padrão ($DEFAULT_BRANCH)." >&2
+            exit 1
+          fi
+
+      - name: Preparar emulação de arquitetura
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Preparar Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Construir imagem de produção
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker buildx build \
+            --pull \
+            --platform "$IMAGE_PLATFORM" \
+            --build-arg "BUILD_REVISION=$GITHUB_SHA" \
+            --tag "$IMAGE_NAME:$GITHUB_SHA" \
+            --load \
+            .
+          test "$(docker image inspect "$IMAGE_NAME:$GITHUB_SHA" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
+
+      - name: Empacotar imagem
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          docker save "$IMAGE_NAME:$GITHUB_SHA" | gzip -1 > "nja-release-$GITHUB_SHA.tar.gz"
+          test -s "nja-release-$GITHUB_SHA.tar.gz"
+          ls -lh "nja-release-$GITHUB_SHA.tar.gz"
+
+      - name: Preparar SSH
+        env:
+          DEPLOY_KEY: ${{ secrets.PROD_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.PROD_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$DEPLOY_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+          ssh-keygen -y -f "$HOME/.ssh/id_ed25519" >/dev/null
+
+      - name: Enviar imagem para a VPS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          scp \
+            -i "$HOME/.ssh/id_ed25519" \
+            -P "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "nja-release-$GITHUB_SHA.tar.gz" \
+            "$DEPLOY_USER@$DEPLOY_HOST:incoming/nja-release-$GITHUB_SHA.tar.gz"
+
+      - name: Implantar e validar
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -i "$HOME/.ssh/id_ed25519" \
+            -p "$DEPLOY_PORT" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "sudo -n /usr/local/sbin/nja-deploy '$GITHUB_SHA' '/home/nja-deploy/incoming/nja-release-$GITHUB_SHA.tar.gz'"
+
+      - name: Remover chave temporária
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/id_ed25519"

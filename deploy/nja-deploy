@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly PROJECT_NAME="nja-system"
+readonly COMPOSE_FILE="/etc/nja-system/compose.production.yaml"
+readonly APP_ENV="/www/wwwroot/nja-system/.env"
+readonly STATE_DIR="/var/lib/nja-deploy"
+readonly STATE_FILE="$STATE_DIR/current.env"
+readonly BACKUP_DIR="/www/backup/nja"
+readonly LOCK_FILE="/var/lock/nja-deploy.lock"
+
+release="${1:-}"
+archive="${2:-}"
+
+if [[ ! "$release" =~ ^[0-9a-f]{40,64}$ ]]; then
+  echo "Release inválida: use o SHA completo do commit." >&2
+  exit 2
+fi
+
+expected_archive="/home/nja-deploy/incoming/nja-release-$release.tar.gz"
+if [[ "$archive" != "$expected_archive" || ! -f "$archive" || -L "$archive" ]]; then
+  echo "Pacote de release inválido." >&2
+  exit 2
+fi
+
+for required in "$COMPOSE_FILE" "$APP_ENV"; do
+  if [[ ! -f "$required" ]]; then
+    echo "Arquivo obrigatório ausente: $required" >&2
+    exit 2
+  fi
+done
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  echo "Já existe outro deploy em execução." >&2
+  exit 3
+fi
+
+mkdir -p "$STATE_DIR" "$BACKUP_DIR"
+gzip -t "$archive"
+
+compose_for() {
+  local image="$1"
+  shift
+  NJA_IMAGE="$image" docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" "$@"
+}
+
+current_web="$(docker ps \
+  --filter "label=com.docker.compose.project=$PROJECT_NAME" \
+  --filter "label=com.docker.compose.service=web" \
+  --format '{{.ID}}' | head -n 1)"
+
+if [[ -z "$current_web" ]]; then
+  echo "O serviço web atual não está em execução; deploy cancelado para preservar o backup." >&2
+  exit 4
+fi
+
+previous_image="$(docker inspect "$current_web" --format '{{.Config.Image}}')"
+if [[ -z "$previous_image" ]]; then
+  echo "Não foi possível identificar a imagem atual." >&2
+  exit 4
+fi
+
+backup_name="pre-deploy-$(date -u +%Y%m%d-%H%M%S)-${release:0:12}"
+echo "Criando backup $backup_name..."
+docker exec "$current_web" python manage.py backup --output "/var/backups/nja/$backup_name"
+
+echo "Carregando imagem nja-system:$release..."
+gzip -dc "$archive" | docker load
+new_image="nja-system:$release"
+
+revision="$(docker image inspect "$new_image" --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')"
+if [[ "$revision" != "$release" ]]; then
+  echo "A revisão da imagem ($revision) não corresponde à release ($release)." >&2
+  exit 5
+fi
+
+rolled_back=0
+rollback() {
+  local status=$?
+  if [[ "$rolled_back" -eq 0 ]]; then
+    rolled_back=1
+    echo "Deploy falhou; restaurando $previous_image..." >&2
+    compose_for "$previous_image" up -d --force-recreate --remove-orphans || true
+  fi
+  exit "$status"
+}
+trap rollback ERR
+
+echo "Validando e publicando $new_image..."
+compose_for "$new_image" config -q
+compose_for "$new_image" up -d --force-recreate --remove-orphans
+
+healthy=0
+for attempt in $(seq 1 30); do
+  if curl -fsS --max-time 5 http://127.0.0.1:8000/ >/dev/null; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+
+if [[ "$healthy" -ne 1 ]]; then
+  echo "Health check falhou após 60 segundos." >&2
+  compose_for "$new_image" logs --tail=150 web scheduler >&2 || true
+  false
+fi
+
+for service in web scheduler; do
+  service_container="$(compose_for "$new_image" ps -q "$service")"
+  if [[ -z "$service_container" || "$(docker inspect "$service_container" --format '{{.State.Running}}')" != "true" ]]; then
+    echo "O serviço $service não permaneceu em execução." >&2
+    compose_for "$new_image" logs --tail=150 "$service" >&2 || true
+    false
+  fi
+done
+
+state_tmp="$(mktemp "$STATE_DIR/current.env.XXXXXX")"
+printf 'NJA_IMAGE=%s\n' "$new_image" > "$state_tmp"
+chmod 600 "$state_tmp"
+mv -f "$state_tmp" "$STATE_FILE"
+
+trap - ERR
+rm -f "$archive"
+echo "Deploy concluído: $new_image"
+compose_for "$new_image" ps

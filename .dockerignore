@@ -3,3 +3,8 @@
 data
 __pycache__
 tests/__pycache__
+.git
+.github
+deploy
+tests
+nja-release-*.tar.gz

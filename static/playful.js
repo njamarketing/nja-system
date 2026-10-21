@@ -100,7 +100,7 @@ const ninjaHourMessage=hour=>[
   }
   function mount(){
     root=document.createElement('aside');root.className='ninja-companion ninja-v17 ninja-v19';root.setAttribute('aria-label','Assistente Ninja NJA');
-    root.innerHTML=`<section class="ninja-talk" role="dialog" aria-label="Balão do Ninja" hidden><header><img src="/nja-systems-icon.png" alt=""><div><strong>Ninja</strong><small>Seu parceiro na NJA</small></div><button data-ninja="close" aria-label="Fechar balão">×</button></header><nav aria-label="Recursos do Ninja"><button data-ninja="today">Meu dia</button><button data-ninja="weather">Clima</button><button data-ninja="chat">Conversar com IA</button></nav><div class="ninja-talk-body"></div></section>
+    root.innerHTML=`<section class="ninja-talk" role="dialog" aria-label="Balão do Ninja" hidden><header><img src="/nja-systems-icon.png" alt=""><div><strong>Ninja</strong><small>Seu parceiro na NJA</small></div><button data-ninja="close" aria-label="Fechar balão">×</button></header><nav aria-label="Recursos do Ninja"><button data-ninja="today">Meu dia</button><button data-ninja="chat">IA</button></nav><div class="ninja-talk-body"></div></section>
     <div class="ninja-stage"><div class="ninja-sign" role="status" aria-live="polite" hidden><button data-ninja="dismiss" aria-label="Dispensar aviso">×</button><span data-ninja-message></span><button data-ninja="event" class="ninja-event-link" hidden>Ver compromisso →</button></div><button class="ninja-character" data-ninja="chat" aria-label="Conversar com o Ninja IA"><span class="ninja-sprite" aria-hidden="true"></span></button></div>
     <div class="ninja-controls"><button class="ninja-chat-trigger" data-ninja="chat" title="Conversar com o Ninja IA" aria-label="Abrir chat com Ninja IA">${ic('chats')}</button><span class="ninja-time"><span data-ninja-clock>00:00</span><small data-ninja-status>Uso ativo hoje</small></span><button data-ninja="actions" title="Escolher animação" aria-label="Escolher animação do Ninja">✦</button><button data-ninja="voice" aria-label="Ativar voz do ninja">◖</button><button data-ninja="pause" title="Pausar contador de uso" aria-label="Pausar contador de uso">Ⅱ</button><button data-ninja="motion" title="Recolher personagem" aria-label="Recolher personagem">◇</button><button data-ninja="hide" title="Ocultar ninja" aria-label="Ocultar ninja">×</button></div><div class="ninja-progress"><span></span></div>`;
     restore=document.createElement('button');restore.className='ninja-reopen';restore.title='Mostrar mini ninja';restore.setAttribute('aria-label','Mostrar mini ninja');restore.innerHTML='<img src="/nja-systems-icon.png" alt="">';restore.hidden=true;
@@ -167,8 +167,11 @@ const ninjaHourMessage=hour=>[
         if(!can('ai')||!can('chats')){body().innerHTML='<p class="ninja-hint">Seu perfil não tem acesso à IA. Solicite ao gestor.</p>';return}
         const room=await request('/ai/room',{method:'POST',data:{}});if(!valid())return;assistantRoom=room.id;
         const history=await request('/rooms/'+room.id+'/messages');if(!valid())return;
-        body().innerHTML=`<div class="ninja-chat-log" role="log" aria-live="polite"></div><p class="ninja-chat-status" role="status"></p><form class="ninja-chat-form"><textarea name="message" rows="2" maxlength="5000" placeholder="Pergunte ao Ninja…" aria-label="Mensagem para o Ninja" required></textarea><button type="submit" aria-label="Enviar ao Ninja" ${chatBusy?'disabled':''}>↑</button></form><button data-ninja="fullchat" class="ninja-full-chat">Abrir conversa completa ↗</button>`;
+        body().innerHTML=`<div class="ninja-chat-log" role="log" aria-live="polite"></div><p class="ninja-chat-status" role="status"></p><form class="ninja-chat-form"><textarea name="message" rows="2" maxlength="5000" placeholder="Pergunte ao Ninja…" aria-label="Mensagem para o Ninja" title="Enter para enviar; Shift + Enter para nova linha" required></textarea><button type="submit" aria-label="Enviar ao Ninja" ${chatBusy?'disabled':''}>↑</button></form><button data-ninja="fullchat" class="ninja-full-chat">Abrir conversa completa ↗</button>`;
         renderChat(history);const form=body().querySelector('form');form.onsubmit=e=>{e.preventDefault();sendChat(form,valid)};
+        form.elements.message.addEventListener('keydown',e=>{
+          if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&e.keyCode!==229){e.preventDefault();if(!e.repeat&&!chatBusy)form.requestSubmit()}
+        });
         if(!state.integrations.ai_configured)body().querySelector('.ninja-chat-status').textContent='A IA aguarda ativação da conta OpenAI da empresa.';
         form.elements.message.focus();mode('idle');
       }
@@ -176,7 +179,7 @@ const ninjaHourMessage=hour=>[
   }
   function renderChat(history){
     const log=body()?.querySelector('.ninja-chat-log');if(!log)return;
-    log.innerHTML=history.messages?.length?history.messages.slice(-30).map(m=>`<article class="ninja-chat-message ${m.user_id===identity?'mine':''}"><small>${m.user_id===identity?'Você':'Ninja IA'}</small><p>${esc(m.text)}</p></article>`).join(''):'<p class="ninja-hint">Olá! Posso ajudar com ideias, textos e dúvidas. O resumo do dia e o clima ficam nas abas acima.</p>';
+    log.innerHTML=history.messages?.length?history.messages.slice(-30).map(m=>`<article class="ninja-chat-message ${m.user_id===identity?'mine':''}"><small>${m.user_id===identity?'Você':'Ninja IA'}</small><p>${esc(m.text)}</p></article>`).join(''):'<p class="ninja-hint">Olá! Posso ajudar com ideias, textos e dúvidas. Enter envia a mensagem; Shift + Enter cria uma nova linha.</p>';
     log.scrollTop=log.scrollHeight;
   }
   async function sendChat(form,valid){

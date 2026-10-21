@@ -10,3 +10,12 @@
 .ninja-chat-form>textarea{grid-column:1;grid-row:1}.ninja-chat-form>button[type=submit]{grid-column:2;grid-row:1}.ninja-chat-form>.writing-tools,.ninja-chat-form>.writing-picker{grid-column:1/-1;margin:0}.ninja-chat-form>.writing-tools button{font-size:11px;padding:7px;min-height:34px}.ninja-chat-form>.writing-picker{max-height:140px}.floating-chat .message{flex-shrink:0;max-width:100%;min-width:0}
 .ninja-v17 .ninja-talk.ninja-keyboard-open{position:fixed!important;top:calc(var(--ninja-visible-top,0px) + 8px)!important;bottom:auto!important;height:calc(var(--ninja-visible-height,100dvh) - 16px);max-height:calc(var(--ninja-visible-height,100dvh) - 16px);left:12px!important;right:12px!important;width:auto;max-width:560px}.ninja-keyboard-open .ninja-talk-body{flex:1}.ninja-keyboard-open .ninja-chat-form textarea{height:72px;min-height:72px!important}.ninja-keyboard-open .ninja-chat-log{min-height:30px;height:70px}.ninja-keyboard-open header{padding:8px}.ninja-keyboard-open nav{padding-bottom:4px}
 .story-private-viewers img.avatar{width:36px!important;height:36px!important;max-height:none!important;object-fit:cover!important;border-radius:11px;flex-shrink:0}
+
+/* Give the floating AI conversation the available height above the Ninja. */
+.ninja-v17 .ninja-talk:has(.ninja-chat-form){width:520px;height:min(680px,calc(100dvh - 200px))}
+.ninja-talk-body:has(.ninja-chat-form){flex:1}
+.ninja-talk-body:has(.ninja-chat-form) .ninja-chat-log{height:auto;min-height:40px}
+.ninja-chat-form textarea{min-height:64px!important;height:64px}
+@media(max-width:760px){.ninja-v17 .ninja-talk:has(.ninja-chat-form){width:auto}.ninja-chat-form textarea{min-height:60px!important;height:60px}}
+@media(max-height:550px){.ninja-v17 .ninja-talk:has(.ninja-chat-form){width:auto;height:auto}}
+.ninja-v17 .ninja-talk.ninja-keyboard-open:has(.ninja-chat-form){width:auto;height:calc(var(--ninja-visible-height,100dvh) - 16px)}

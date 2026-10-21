@@ -87,7 +87,7 @@ Antes de salvar, compare a impressão digital com a exibida diretamente na VPS:
 ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 ```
 
-Crie também o ambiente `production` em **Settings → Environments**. Se o seu plano permitir, habilite aprovação obrigatória e restrinja o ambiente a tags `v*`.
+Crie também o ambiente `production` em **Settings → Environments**. Se o seu plano permitir, habilite aprovação obrigatória e restrinja o ambiente à branch `master` e a tags `v*`. A branch é necessária para o primeiro deploy manual; releases posteriores podem usar tags.
 
 ## 6. Primeiro deploy
 

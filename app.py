@@ -338,7 +338,7 @@ def api(c,environ,method,path,d,q):
         for image_field in ['photo','cover']:
             if image_field not in d:continue
             f=c.execute('SELECT * FROM files WHERE id=?',(d[image_field],)).fetchone()
-            if not f or c.execute('SELECT 1 FROM social_assets WHERE file_id=?',(f['id'],)).fetchone() or f['user_id']!=id or f['task_id'] or f['room_id'] or not f['mime'].startswith('image/'):raise Error(400,'Foto inválida.')
+            if not f or c.execute('SELECT 1 FROM social_assets WHERE file_id=?',(f['id'],)).fetchone() or c.execute('SELECT 1 FROM editorial_uploads WHERE file_id=?',(f['id'],)).fetchone() or f['user_id']!=id or f['task_id'] or f['room_id'] or not f['mime'].startswith('image/'):raise Error(400,'Foto inválida.')
             fields[image_field]=f['id']
         if admin:
             if 'role_id' in d:
@@ -629,7 +629,9 @@ def application(environ,start_response):
             with connect() as c:
                 u,_,_=authenticate(c,environ);f=c.execute('SELECT * FROM files WHERE id=?',(path.split('/')[-1],)).fetchone()
                 if not f:raise Error(404,'Arquivo não encontrado.')
-                if social.file_access(sys.modules[__name__],c,u,f['id']):pass
+                import editorial_studio
+                if editorial_studio.file_access(sys.modules[__name__],c,u,f['id']):pass
+                elif social.file_access(sys.modules[__name__],c,u,f['id']):pass
                 elif f['task_id']:get_task(c,u,f['task_id'])
                 elif f['room_id']:room_access(c,u,f['room_id'])
                 elif f['user_id']!=u['id'] and not any(perm(u,p) for p in ['team','tasks','calendar','chats']):raise Error(403,'Sem acesso à foto.')

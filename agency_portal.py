@@ -91,7 +91,7 @@ def api(a,c,u,method,path,d,q):
   if method=='POST':a.audit(c,u,'portal_chat_send',cid)
   return result
  if path=='/api/agency/reviews' and method=='GET':
-  a.need(u,'approvals');return {'items':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews ORDER BY created DESC') if scope.allowed(c,u,r['client_id'])],'accounts':[dict(r) for r in c.execute('SELECT id,client_id,email,name,active,can_approve FROM portal_accounts') if scope.allowed(c,u,r['client_id'])] if a.perm(u,'portal_manage') else [],'uploads':[{'id':r['id'],'name':r['name'],'client_id':r['client_id'],'created':r['created']} for r in c.execute('SELECT id,name,client_id,created FROM portal_uploads') if scope.allowed(c,u,r['client_id'])]}
+  a.need(u,'approvals');return {'items':[serialize(c,r) for r in c.execute("SELECT * FROM creative_reviews WHERE status<>'direct' ORDER BY created DESC") if scope.allowed(c,u,r['client_id'])],'accounts':[dict(r) for r in c.execute('SELECT id,client_id,email,name,active,can_approve FROM portal_accounts') if scope.allowed(c,u,r['client_id'])] if a.perm(u,'portal_manage') else [],'uploads':[{'id':r['id'],'name':r['name'],'client_id':r['client_id'],'created':r['created']} for r in c.execute('SELECT id,name,client_id,created FROM portal_uploads') if scope.allowed(c,u,r['client_id'])]}
  if path=='/api/agency/reviews' and method=='POST':
   a.need(u,'approvals');a.need(u,'approval_manage');cid=d.get('client_id');scope.need(a,c,u,cid);tid=d.get('task_id') or None
   if tid:
@@ -102,6 +102,7 @@ def api(a,c,u,method,path,d,q):
   parts=path.split('/');id=parts[4];r=review(a,c,u,id);a.need(u,'approvals')
   if len(parts)==5 and method=='GET':return serialize(c,r)
   action=parts[5] if len(parts)>5 else ''
+  if r['status']=='direct':raise a.Error(409,'Edite esta publicação no estúdio editorial do cliente.')
   a.need(u,'approval_manage')
   if action=='versions' and method=='POST':
    if not c.in_transaction:c.execute('BEGIN IMMEDIATE')

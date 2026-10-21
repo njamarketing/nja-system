@@ -34,7 +34,12 @@ def identify(a,path,name):
 
 def upload(a,c,u,q,stream,length):
     tid=q.get('task_id',[''])[0] or None;rid=q.get('room_id',[''])[0] or None
-    if bool(tid)==bool(rid):raise a.Error(400,'Selecione uma tarefa ou conversa para o arquivo.')
+    cid=q.get('editorial_client_id',[''])[0] or None
+    if sum(bool(x) for x in [tid,rid,cid])!=1:raise a.Error(400,'Selecione uma tarefa, conversa ou cliente editorial para o arquivo.')
+    if cid:
+        import agency_access
+        a.need(u,'editorial');a.need(u,'editorial_manage');client=agency_access.need(a,c,u,cid)
+        if not client['active']:raise a.Error(409,'Cliente desativado.')
     if tid:a.get_task(c,u,tid);a.need(u,'task_edit')
     if rid:
         import teamwork
@@ -51,8 +56,20 @@ def upload(a,c,u,q,stream,length):
                 block=stream.read(min(64*1024,remaining))
                 if not block:raise a.Error(400,'O envio foi interrompido. Selecione o arquivo novamente.')
                 f.write(block);remaining-=len(block)
-        mime=identify(a,temporary,name);os.replace(temporary,dest);temporary=None
+        mime=identify(a,temporary,name)
+        if cid:
+            if mime not in ['image/jpeg','image/png','image/webp','video/mp4']:raise a.Error(400,'Envie uma imagem JPG, PNG, WebP ou vídeo MP4.')
+            if mime.startswith('image/'):
+                from PIL import Image,ImageOps
+                try:
+                    with Image.open(temporary) as image:
+                        if image.width*image.height>40_000_000:raise ValueError()
+                        image=ImageOps.exif_transpose(image).convert('RGB');image.thumbnail((1440,1440));image.save(temporary,format='JPEG',quality=94)
+                    mime='image/jpeg';name=Path(name).stem+'.jpg';length=temporary.stat().st_size
+                except Exception:raise a.Error(400,'Imagem inválida ou grande demais. Use até 40 megapixels.')
+        os.replace(temporary,dest);temporary=None
         c.execute('INSERT INTO files VALUES(?,?,?,?,?,?,?,?)',(file_id,name,mime,length,u['id'],tid,rid,a.now()))
+        if cid:c.execute('INSERT INTO editorial_uploads VALUES(?,?)',(file_id,cid))
         if rid:
             for member in c.execute('SELECT user_id FROM room_members WHERE room_id=? AND user_id<>?',(rid,u['id'])):a.notify(c,member[0],u['name'],'Enviou um material: '+name,'chats:'+rid,'messages')
         a.audit(c,u,'file_upload',file_id,name)

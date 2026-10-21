@@ -11,13 +11,17 @@ def init(c):
  CREATE TABLE IF NOT EXISTS creative_assets(version_id TEXT NOT NULL REFERENCES creative_versions(id),file_id TEXT NOT NULL REFERENCES files(id),position INTEGER NOT NULL,PRIMARY KEY(version_id,file_id));''')
 
  if 'deleted' not in [r[1] for r in c.execute('PRAGMA table_info(social_accounts)')]:c.execute('ALTER TABLE social_accounts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
+ if 'source' not in [r[1] for r in c.execute('PRAGMA table_info(editorial_posts)')]:c.execute("ALTER TABLE editorial_posts ADD COLUMN source TEXT NOT NULL DEFAULT 'approval'")
+ c.executescript('''CREATE TABLE IF NOT EXISTS editorial_uploads(file_id TEXT PRIMARY KEY REFERENCES files(id),client_id TEXT NOT NULL REFERENCES clients(id));
+ CREATE TABLE IF NOT EXISTS editorial_submissions(nonce TEXT PRIMARY KEY,user_id TEXT NOT NULL,payload TEXT NOT NULL,post_id TEXT NOT NULL REFERENCES editorial_posts(id));''')
 
 def assets(c,v):
  rows=c.execute('SELECT f.* FROM creative_assets x JOIN files f ON f.id=x.file_id WHERE x.version_id=? ORDER BY x.position',(v['id'],)).fetchall()
  return rows or ([c.execute('SELECT * FROM files WHERE id=?',(v['file_id'],)).fetchone()] if v['file_id'] else [])
 def approved(a,c,p):
  v=c.execute('SELECT * FROM creative_versions WHERE id=?',(p['version_id'],)).fetchone();r=c.execute('SELECT * FROM creative_reviews WHERE id=?',(v['review_id'],)).fetchone()
- if r['client_id']!=p['client_id'] or r['current_version']!=v['id'] or r['status']!='approved':raise a.Error(409,'A publicação exige a versão atual aprovada. Uma nova revisão bloqueia o agendamento anterior.')
+ expected='direct' if p['source']=='direct' else 'approved'
+ if r['client_id']!=p['client_id'] or r['current_version']!=v['id'] or r['status']!=expected:raise a.Error(409,'A publicação exige a versão atual aprovada. Uma nova revisão bloqueia o agendamento anterior.')
  fs=assets(c,v)
  if any(not f or not (a.DATA/'uploads'/f['id']).is_file() for f in fs):raise a.Error(409,'Um arquivo aprovado não está disponível.')
  digest=hashlib.sha256()
@@ -31,6 +35,7 @@ def approved(a,c,p):
  if fmt=='text' and fs:raise a.Error(400,'Texto não pode descartar arquivos aprovados.')
  if fmt=='image' and (len(fs)!=1 or fs[0]['mime']!='image/jpeg'):raise a.Error(400,'A publicação de imagem usa uma imagem JPEG aprovada.')
  if fmt=='reel' and (len(fs)!=1 or fs[0]['mime']!='video/mp4'):raise a.Error(400,'Reel exige um vídeo MP4 aprovado.')
+ if fmt=='video' and (len(fs)!=1 or fs[0]['mime']!='video/mp4'):raise a.Error(400,'Selecione um vídeo MP4.')
  if fmt=='carousel' and (not 2<=len(fs)<=10 or any(f['mime']!='image/jpeg' for f in fs)):raise a.Error(400,'Carrossel exige de 2 a 10 imagens JPEG aprovadas, na ordem da versão.')
  return v,fs
 
@@ -51,7 +56,10 @@ def api(a,c,u,method,path,d,q):
  if not path.startswith('/api/agency/editorial'):return None
  a.need(u,'editorial');parts=path.split('/')[4:]
  if not parts and method=='GET':
-  return {'accounts':[dict(r) for r in c.execute("SELECT id,client_id,name,platform,target,active,verified FROM social_accounts WHERE platform<>'ads' AND deleted=0") if scope.allowed(c,u,r['client_id'])],'posts':[dict(r) for r in c.execute('SELECT p.*,s.name AS account_name FROM editorial_posts p JOIN social_accounts s ON s.id=p.account_id ORDER BY p.scheduled') if scope.allowed(c,u,r['client_id'])],'reviews':[{'id':r['id'],'client_id':r['client_id'],'title':r['title'],'version_id':r['current_version'],'status':r['status']} for r in c.execute('SELECT * FROM creative_reviews') if scope.allowed(c,u,r['client_id'])]}
+  return {'clients':[dict(r) for r in c.execute('SELECT id,name,active FROM clients ORDER BY name') if scope.allowed(c,u,r['id'])],'uploads':[{k:r[k] for k in ['id','name','mime','size','client_id']} for r in c.execute('SELECT f.*,e.client_id FROM files f JOIN editorial_uploads e ON e.file_id=f.id ORDER BY f.created DESC LIMIT 500') if scope.allowed(c,u,r['client_id'])],'accounts':[dict(r) for r in c.execute("SELECT id,client_id,name,platform,target,active,verified FROM social_accounts WHERE platform<>'ads' AND deleted=0") if scope.allowed(c,u,r['client_id'])],'posts':[dict(r) for r in c.execute('SELECT p.*,s.name AS account_name FROM editorial_posts p JOIN social_accounts s ON s.id=p.account_id ORDER BY p.scheduled') if scope.allowed(c,u,r['client_id'])],'reviews':[{'id':r['id'],'client_id':r['client_id'],'title':r['title'],'version_id':r['current_version'],'status':r['status']} for r in c.execute("SELECT * FROM creative_reviews WHERE status<>'direct'") if scope.allowed(c,u,r['client_id'])]}
+ import editorial_studio
+ if parts==['direct'] or (len(parts)==2 and parts[0]=='posts' and method=='GET') or (len(parts)==2 and parts[0]=='posts' and method=='PATCH'):
+  return editorial_studio.api(a,c,u,method,parts,d)
  a.need(u,'editorial_manage')
  if parts and parts[0]=='accounts':
   a.need(u,'integrations_manage')
@@ -137,7 +145,9 @@ def tick(a):
    c.commit()
    try:
     if acc['platform']=='facebook':
-     result=graph(a,acc,acc['target']+('/photos' if fs else '/feed'),{'url':urls[0],'caption':v['caption']} if fs else {'message':v['caption']});external=result.get('post_id') or result['id']
+     if p['format']=='video':result=graph(a,acc,acc['target']+'/videos',{'file_url':urls[0],'description':v['caption']})
+     else:result=graph(a,acc,acc['target']+('/photos' if fs else '/feed'),{'url':urls[0],'caption':v['caption']} if fs else {'message':v['caption']})
+     external=result.get('post_id') or result['id']
     else:
      container=p['container']
      if not container:

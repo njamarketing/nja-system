@@ -1,5 +1,7 @@
 .env
+.env.release
 .venv/
 data/
 __pycache__/
 *.pyc
+nja-release-*.tar.gz

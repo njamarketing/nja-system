@@ -1,7 +1,7 @@
 """Separate client identities; immutable versions and explicit sharing."""
 import base64,hashlib,json,re,secrets,time,tempfile
 from pathlib import Path
-import agency_access as scope,attachments,agency_editorial
+import agency_access as scope,attachments,agency_editorial,meetings
 
 def init(c):
  c.executescript('''CREATE TABLE IF NOT EXISTS portal_accounts(id TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES clients(id),email TEXT NOT NULL,name TEXT NOT NULL,password TEXT,active INTEGER NOT NULL DEFAULT 1,can_approve INTEGER NOT NULL DEFAULT 1,UNIQUE(client_id,email));
@@ -14,7 +14,9 @@ def init(c):
  CREATE TABLE IF NOT EXISTS portal_chat_messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,client_id TEXT NOT NULL REFERENCES clients(id),actor TEXT NOT NULL,name TEXT NOT NULL,text TEXT NOT NULL,created TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS portal_chat_client ON portal_chat_messages(client_id,seq);
  CREATE TABLE IF NOT EXISTS review_uploads(file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,review_id TEXT NOT NULL REFERENCES creative_reviews(id) ON DELETE CASCADE);
- CREATE TABLE IF NOT EXISTS portal_shares(document_id TEXT PRIMARY KEY REFERENCES business_documents(id),client_id TEXT NOT NULL REFERENCES clients(id),created TEXT NOT NULL);''')
+ CREATE TABLE IF NOT EXISTS portal_shares(document_id TEXT PRIMARY KEY REFERENCES business_documents(id),client_id TEXT NOT NULL REFERENCES clients(id),created TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS meeting_portal_members(meeting_id TEXT REFERENCES meetings(id) ON DELETE CASCADE,account_id TEXT REFERENCES portal_accounts(id),status TEXT NOT NULL,joined REAL NOT NULL DEFAULT 0,invited REAL NOT NULL,PRIMARY KEY(meeting_id,account_id));
+ CREATE INDEX IF NOT EXISTS ix_meeting_portal_account ON meeting_portal_members(account_id,meeting_id);''')
  for table,column,definition in [('messages','portal_account_id','TEXT'),('messages','portal_name',"TEXT NOT NULL DEFAULT ''"),('creative_reviews','format',"TEXT NOT NULL DEFAULT 'post'")]:
   if column not in [r[1] for r in c.execute('PRAGMA table_info('+table+')')]:c.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
 
@@ -84,7 +86,21 @@ def chat(a,c,cid,actor,name,method,d,q):
  raise a.Error(405,'Método não permitido.')
 
 def client_rooms(c,cid):
- return [dict(r) for r in c.execute("SELECT id,name,photo,description,created FROM rooms WHERE client_id=? AND kind='group' ORDER BY created",(cid,))]
+ rooms=[]
+ for row in c.execute("SELECT id,name,photo,description,created FROM rooms WHERE client_id=? AND kind='group' ORDER BY created",(cid,)):
+  room=dict(row)
+  staff=[dict(member)|{'kind':'team'} for member in c.execute('''SELECT u.id,u.name,u.title,u.photo FROM room_members rm JOIN users u ON u.id=rm.user_id WHERE rm.room_id=? AND u.active=1 ORDER BY u.name''',(row['id'],))]
+  contacts=[{'id':'portal:'+member['id'],'name':member['name'],'title':'Cliente','photo':member['photo'],'kind':'client'} for member in c.execute('''SELECT p.id,p.name,cl.photo FROM portal_accounts p JOIN clients cl ON cl.id=p.client_id WHERE p.client_id=? AND p.active=1 ORDER BY p.name''',(cid,))]
+  room['members']=staff+contacts;rooms.append(room)
+ return rooms
+
+def brand_file(a,c,p,fid):
+ allowed=c.execute('''SELECT 1 FROM clients cl WHERE cl.id=? AND (?=cl.photo OR ?=cl.cover)
+  UNION ALL SELECT 1 FROM rooms r WHERE r.client_id=? AND r.kind='group' AND r.photo=? LIMIT 1''',(p['client_id'],fid,fid,p['client_id'],fid)).fetchone()
+ if not allowed:raise a.Error(404,'Imagem não compartilhada.')
+ file=c.execute('SELECT * FROM files WHERE id=?',(fid,)).fetchone()
+ if not file:raise a.Error(404,'Imagem não encontrada.')
+ return file
 
 def portal_room(a,c,cid,rid):
  r=c.execute("SELECT * FROM rooms WHERE id=? AND client_id=? AND kind='group'",(rid,cid)).fetchone()
@@ -226,6 +242,8 @@ def portal_api(a,c,environ,method,path,d,q):
   if not r or not r['password'] or not a.verify_password(a.textfield(d,'password',True,256),r['password']):raise a.Error(401,'Cliente, e-mail ou senha incorretos.')
   token=secrets.token_urlsafe(32);c.execute('INSERT INTO portal_sessions VALUES(?,?,?)',(a.digest(token),r['id'],time.time()+28800));return {'token':token,'name':r['name']}
  p=principal(a,c,environ);cid=p['client_id']
+ meeting_result=meetings.portal_api(a,c,p,method,action,d,q)
+ if meeting_result is not None:return meeting_result
  if action=='rooms' and method=='GET':return {'rooms':client_rooms(c,cid)}
  if action.startswith('rooms/'):
   parts=action.split('/')
@@ -236,8 +254,14 @@ def portal_api(a,c,environ,method,path,d,q):
   return portal_room_chat(a,c,p,rooms[0]['id'],method,d,q)
  if action=='logout' and method=='POST':c.execute('DELETE FROM portal_sessions WHERE token=?',(a.digest(environ.get('HTTP_X_PORTAL_TOKEN','')),));return {'ok':True}
  if action=='home' and method=='GET':
-  client=c.execute('SELECT id,name,photo FROM clients WHERE id=?',(cid,)).fetchone()
-  return {'client':dict(client),'person':{'name':p['name'],'can_approve':bool(p['can_approve'])},'rooms':client_rooms(c,cid),'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
+  client=c.execute('SELECT id,name,entered,product,description,photo,cover FROM clients WHERE id=?',(cid,)).fetchone()
+  plans=[]
+  for plan in c.execute("SELECT id,name,items,start_month,end_month,active FROM service_plans WHERE client_id=? AND active=1 ORDER BY created DESC",(cid,)):
+   value=dict(plan)
+   try:value['items']=json.loads(value['items'])
+   except (ValueError,TypeError):value['items']=[]
+   plans.append(value)
+  return {'client':dict(client),'person':{'id':p['id'],'name':p['name'],'can_approve':bool(p['can_approve'])},'plan':plans[0] if plans else None,'plans':plans,'rooms':client_rooms(c,cid),'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
  if action.startswith('reviews/'):
   id=action.split('/')[1];r=c.execute('SELECT * FROM creative_reviews WHERE id=? AND client_id=? AND shared=1',(id,cid)).fetchone()
   if not r:raise a.Error(404,'Material não compartilhado.')

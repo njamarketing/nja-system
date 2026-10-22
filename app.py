@@ -468,7 +468,9 @@ def api(c,environ,method,path,d,q):
             SELECT 1 FROM room_deletions d WHERE d.user_id=? AND d.room_id=rooms.id)
           ORDER BY rooms.created''',(u['id'],u['id'])):
             if r['client_id'] and not agency_access.allowed(c,u,r['client_id']):continue
-            x=dict(r);x.update(teamwork.serialize(sys.modules[__name__],c,u,r));x['archived']=bool(c.execute('SELECT 1 FROM room_archives WHERE user_id=? AND room_id=?',(u['id'],r['id'])).fetchone());x['members']=[v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r['id'],))];x['unread']=c.execute("SELECT count(*) FROM messages WHERE room_id=? AND created>? AND COALESCE(user_id,'')<>?",(r['id'],r['last_read'],u['id'])).fetchone()[0];last=c.execute('SELECT text,created FROM messages WHERE room_id=? ORDER BY created DESC,rowid DESC LIMIT 1',(r['id'],)).fetchone();x['last']=dict(last) if last else None;result.append(x)
+            x=dict(r);x.update(teamwork.serialize(sys.modules[__name__],c,u,r));x['archived']=bool(c.execute('SELECT 1 FROM room_archives WHERE user_id=? AND room_id=?',(u['id'],r['id'])).fetchone());x['members']=[v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r['id'],))]
+            x['portal_contacts']=[{'id':'portal:'+v['id'],'name':v['name'],'photo':v['photo'],'external':True} for v in c.execute('''SELECT p.id,p.name,cl.photo FROM portal_accounts p JOIN clients cl ON cl.id=p.client_id WHERE p.client_id=? AND p.active=1 ORDER BY p.name''',(r['client_id'],))] if r['kind']=='group' and r['client_id'] else []
+            x['unread']=c.execute("SELECT count(*) FROM messages WHERE room_id=? AND created>? AND COALESCE(user_id,'')<>?",(r['id'],r['last_read'],u['id'])).fetchone()[0];last=c.execute('SELECT text,created FROM messages WHERE room_id=? ORDER BY created DESC,rowid DESC LIMIT 1',(r['id'],)).fetchone();x['last']=dict(last) if last else None;result.append(x)
         return result,headers
     if path=='/api/rooms' and method=='POST':
         need(u,'chats');kind=d.get('kind','group');members=active_ids(c,d.get('members',[]))
@@ -647,6 +649,12 @@ def application(environ,start_response):
             with connect() as c:
                 person=agency_portal.principal(sys.modules[__name__],c,environ)
                 f=agency_portal.shared_file(sys.modules[__name__],c,person,path.split('/')[-1])
+                return attachments.download(sys.modules[__name__],f,environ,start_response,headers)
+        if path.startswith('/portal-brand/'):
+            if method not in ['GET','HEAD']:raise Error(404,'Imagem indisponível.')
+            with connect() as c:
+                person=agency_portal.principal(sys.modules[__name__],c,environ)
+                f=agency_portal.brand_file(sys.modules[__name__],c,person,path.split('/')[-1])
                 return attachments.download(sys.modules[__name__],f,environ,start_response,headers)
         if path.startswith('/files/'):
             if method not in ['GET','HEAD']:raise Error(404,'Arquivo não encontrado.')

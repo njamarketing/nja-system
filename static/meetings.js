@@ -19,7 +19,7 @@ async function pollMeetings(){if(!state.user||!can('chats')||meetingBusy||meetin
  }catch(e){console.warn('Falha de sinalização de um participante',e.name);entry.offerSent=false;}meetingCursor=s.id}}catch(e){if(currentMeeting){toast(e.message);if(/Sem acesso|conversa|Sessão/.test(e.message))cleanupMeeting()}}finally{meetingBusy=false}}
 async function leaveMeeting(all=false){const m=currentMeeting;const invitation=meetingIncoming;cleanupMeeting();if(m){try{await request('/meetings/'+m.id+'/action',{method:'POST',data:{action:all?'end':'leave'}})}catch(e){toast(e.message)}}else if(invitation){try{await request('/meetings/'+invitation.id+'/action',{method:'POST',data:{action:'decline'}})}catch{}}}
 function cleanupMeeting(){meetingGeneration++;meetingScreen?.getTracks().forEach(t=>{t.onended=null;t.stop()});meetingScreen=null;meetingStream?.getTracks().forEach(t=>t.stop());meetingStream=null;for(const e of meetingPeers.values()){e.pc.onconnectionstatechange=null;e.pc.ontrack=null;e.pc.onicecandidate=null;e.pc.close()}meetingPeers.clear();currentMeeting=null;meetingIncoming=null;meetingCursor=0;$('#meeting-panel')?.remove();$('#meeting-incoming')?.remove()}
-setInterval(pollMeetings,1500);
+setInterval(()=>pollMeetings(),1500);
 const meetingLogout=logoutLocal;logoutLocal=function(){leaveMeeting();meetingLogout()};
 window.addEventListener('pagehide',()=>{if(currentMeeting)fetch('/api/meetings/'+currentMeeting.id+'/action',{method:'POST',headers:{'Content-Type':'application/json','X-CSRF-Token':state.csrf},body:JSON.stringify({action:'leave'}),keepalive:true}).catch(()=>{});cleanupMeeting()});
 

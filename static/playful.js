@@ -185,14 +185,18 @@ const ninjaHourMessage=hour=>[
   async function sendChat(form,valid){
     if(chatBusy)return;const text=form.elements.message.value.trim();if(!text)return;
     chatBusy=true;const sendingEpoch=epoch,button=form.querySelector('button'),status=body().querySelector('.ninja-chat-status'),rid=assistantRoom;
-    button.disabled=true;status.textContent='Enviando…';mode('think');
+    button.disabled=true;form.elements.message.value='';status.textContent='Ninja IA está digitando…';mode('think');
+    const log=body().querySelector('.ninja-chat-log');if(log){if(log.querySelector('.ninja-hint'))log.innerHTML='';log.insertAdjacentHTML('beforeend',`<article class="ninja-chat-message mine pending"><small>Você · enviando</small><p>${esc(text)}</p></article>`);log.scrollTop=log.scrollHeight;}
+    window.dispatchEvent(new CustomEvent('nja:ai-thinking',{detail:{active:true,roomId:rid,source:'playful'}}));
+    let saved=false;
     try{
-      const result=await request('/rooms/'+rid+'/messages',{method:'POST',data:{text}});
-      if(!valid())return;form.elements.message.value='';status.textContent=result.ai_error?'Mensagem salva. '+result.ai_error:'Mensagem enviada.';
-      const history=await request('/rooms/'+rid+'/messages');if(!valid())return;renderChat(history);
-      if(result.ai&&!result.ai_error){const reply=history.messages.filter(m=>m.user_id!==identity).at(-1);if(reply)speak(reply.text)}
-    }catch(e){if(valid())status.textContent=e.message}
-    finally{if(sendingEpoch===epoch)chatBusy=false;if(valid()){button.disabled=false;mode('idle')}}
+      const result=await request('/rooms/'+rid+'/messages',{method:'POST',data:{text,defer_ai:true}});
+      saved=true;if(!valid())return;
+      if(result.ai_pending)await request('/rooms/'+rid+'/ai',{method:'POST',data:{prompt:text}});
+      const history=await request('/rooms/'+rid+'/messages');if(!valid())return;renderChat(history);status.textContent=result.ai_pending?'Resposta concluída.':'Mensagem enviada.';
+      if(result.ai_pending){const reply=history.messages.filter(m=>m.user_id!==identity).at(-1);if(reply)speak(reply.text)}
+    }catch(e){if(valid()){status.textContent=saved?'Mensagem salva. '+e.message:e.message;if(!saved&&!form.elements.message.value)form.elements.message.value=text}}
+    finally{window.dispatchEvent(new CustomEvent('nja:ai-thinking',{detail:{active:false,roomId:rid,source:'playful'}}));if(sendingEpoch===epoch)chatBusy=false;if(valid()){button.disabled=false;mode('idle')}}
   }
   async function pollAlerts(){
     if(pollBusy||document.hidden||!document.hasFocus()||!navigator.onLine||!safe())return;
@@ -205,6 +209,12 @@ const ninjaHourMessage=hour=>[
     if(!safe()||document.hidden||prefs.hidden||prefs.compact||paused||reduce.matches)return;
     mode('celebrate',4000);nextAction=rest();
     window.dispatchEvent(new CustomEvent('nja:shuriken-burst',{detail:{x:x+(root.getBoundingClientRect().width||288)-56,y:root.querySelector('.ninja-character').getBoundingClientRect().top+55}}));
+  });
+  window.addEventListener('nja:ai-thinking',e=>{
+    if(!safe())return;const active=!!e.detail?.active;root.classList.toggle('ninja-ai-working',active);
+    root.querySelector('.ninja-ai-thought')?.remove();
+    if(active&&!root.hidden){const bubble=document.createElement('span');bubble.className='ninja-ai-thought';bubble.setAttribute('aria-label','Ninja IA está pensando e digitando');bubble.innerHTML='<i></i><i></i><i></i>';root.querySelector('.ninja-stage')?.append(bubble);mode('think');}
+    else if(!chatBusy){mode('idle');nextAction=rest();}
   });
   function resetUser(){
     epoch++;stopWalk();window.speechSynthesis?.cancel();if(root){root.remove();restore.remove();root=restore=null}

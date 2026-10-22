@@ -144,9 +144,14 @@ def respond(a,c,u,rid,prompt=''):
     except Exception:
         c.execute("UPDATE ai_jobs SET status='failed',error='Falha de integração' WHERE id=?",(job,));c.commit();raise a.Error(503,'Não foi possível gerar a resposta. A mensagem original foi preservada.')
 
-def maybe_respond(a,c,u,rid,text):
+def wants_response(a,c,u,rid,text):
     room=c.execute('SELECT * FROM rooms WHERE id=?',(rid,)).fetchone()
-    if not room['ai_enabled'] or not a.perm(u,'ai') or (room['kind']!='assistant' and not re.search(r'@ninja\b',text,re.I)):return {}
+    return bool(room and room['ai_enabled'] and a.perm(u,'ai') and
+                (room['kind']=='assistant' or re.search(r'@ninja\b',text,re.I)))
+
+
+def maybe_respond(a,c,u,rid,text):
+    if not wants_response(a,c,u,rid,text):return {}
     c.commit()
     try:return {'ai':respond(a,c,u,rid)}
     except a.Error as e:return {'ai_error':e.message}
@@ -176,7 +181,9 @@ def transcribe(a,c,u,fid):
 def audio_api(a,c,u,method,path,d,q):
     if path=='/api/ai/room' and method=='POST':
         a.need(u,'chats');a.need(u,'ai');room=c.execute("SELECT r.id FROM rooms r JOIN room_members m ON m.room_id=r.id WHERE r.kind='assistant' AND m.user_id=?",(u['id'],)).fetchone()
-        if room:return {'id':room[0]}
+        if room:
+            c.execute('DELETE FROM room_deletions WHERE user_id=? AND room_id=?',(u['id'],room[0]))
+            return {'id':room[0]}
         rid=a.uid();c.execute('INSERT INTO rooms(id,name,kind,creator,created) VALUES(?,?,?,?,?)',(rid,'Ninja IA · seu assistente','assistant',u['id'],a.now()));c.execute('INSERT INTO room_members(room_id,user_id) VALUES(?,?)',(rid,u['id']));return {'id':rid}
     if path.startswith('/api/rooms/') and path.endswith('/ai'):
         rid=path.split('/')[3];a.room_access(c,u,rid)

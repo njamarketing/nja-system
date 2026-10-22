@@ -16,11 +16,45 @@ CREATE TABLE IF NOT EXISTS file_reactions(
 CREATE TABLE IF NOT EXISTS story_views(
  story_id TEXT REFERENCES stories(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id),
  viewed TEXT NOT NULL, PRIMARY KEY(story_id,user_id));
+CREATE TABLE IF NOT EXISTS message_receipts(
+ message_id TEXT REFERENCES messages(id) ON DELETE CASCADE, user_id TEXT REFERENCES users(id),
+ delivered TEXT, read TEXT, PRIMARY KEY(message_id,user_id));
+CREATE TABLE IF NOT EXISTS room_deletions(
+ user_id TEXT REFERENCES users(id), room_id TEXT REFERENCES rooms(id) ON DELETE CASCADE,
+ deleted TEXT NOT NULL, PRIMARY KEY(user_id,room_id));
 CREATE TABLE IF NOT EXISTS sale_celebrations(
  seq INTEGER PRIMARY KEY AUTOINCREMENT, sale_id TEXT NOT NULL UNIQUE REFERENCES sales(id),
  seller TEXT NOT NULL REFERENCES users(id), name TEXT NOT NULL,
  position INTEGER NOT NULL, assumed_first INTEGER NOT NULL, month TEXT NOT NULL, created TEXT NOT NULL);
 ''')
+
+
+def prepare_receipts(c, room_id, message_id, author_id):
+    """Create one delivery/read record for every recipient of a message."""
+    c.execute('''INSERT OR IGNORE INTO message_receipts(message_id,user_id,delivered,read)
+      SELECT ?,user_id,NULL,NULL FROM room_members WHERE room_id=? AND user_id<>?''',
+              (message_id, room_id, author_id))
+
+
+def mark_delivered(c, room_id, user_id, timestamp):
+    c.execute('''UPDATE message_receipts SET delivered=COALESCE(delivered,?)
+      WHERE user_id=? AND message_id IN (SELECT id FROM messages WHERE room_id=?)''',
+              (timestamp, user_id, room_id))
+
+
+def mark_read(c, room_id, user_id, timestamp):
+    c.execute('''UPDATE message_receipts SET delivered=COALESCE(delivered,?),read=COALESCE(read,?)
+      WHERE user_id=? AND message_id IN (SELECT id FROM messages WHERE room_id=?)''',
+              (timestamp, timestamp, user_id, room_id))
+
+
+def add_receipts(c, rows):
+    for row in rows:
+        row['receipts'] = [dict(r) for r in c.execute(
+            '''SELECT mr.user_id,u.name,mr.delivered AS delivered_at,mr.read AS read_at
+               FROM message_receipts mr JOIN users u ON u.id=mr.user_id
+               WHERE mr.message_id=? ORDER BY u.name''', (row['id'],))]
+    return rows
 
 
 def chat_target(a, c, room_id, target_id, kind):

@@ -39,6 +39,28 @@ class InteractionTest(unittest.TestCase):
   self.assertEqual(self.call(url+'/interactions','POST',{'target_id':mid,'emoji':'👍'},who='alice')[0],403)
   self.assertEqual(self.call(url+'/reactions','POST',{'message_id':mid,'emoji':'👍'},who='alice')[0],403)
   self.assertEqual(self.call(url+'/messages','POST',{'text':'Oi','reply_to':mid},who='alice')[0],403)
+ def test_message_receipts_delivery_read_and_personal_chat_deletion(self):
+  rid=self.room();url='/api/rooms/'+rid
+  mid=self.call(url+'/messages','POST',{'text':'Você recebeu?'})[1]['id']
+  before=self.call(url+'/messages')[1]['messages'][-1]
+  self.assertIsNone(before['receipts'][0]['delivered_at']);self.assertIsNone(before['receipts'][0]['read_at'])
+  self.call(url+'/messages',who='alice')
+  delivered=self.call(url+'/messages')[1]['messages'][-1]['receipts'][0]
+  self.assertIsNotNone(delivered['delivered_at']);self.assertIsNone(delivered['read_at'])
+  self.call(url+'/read','POST',{},who='alice')
+  viewed=self.call(url+'/messages')[1]['messages'][-1]['receipts'][0]
+  self.assertIsNotNone(viewed['read_at']);self.assertEqual(viewed['user_id'],'alice')
+  self.assertEqual(self.call(url,'DELETE',{})[0],200)
+  self.assertNotIn(rid,[r['id'] for r in self.call('/api/rooms')[1]])
+  self.assertIn(rid,[r['id'] for r in self.call('/api/rooms',who='alice')[1]])
+  self.call(url+'/messages','POST',{'text':'A conversa voltou'},who='alice')
+  self.assertIn(rid,[r['id'] for r in self.call('/api/rooms')[1]])
+  self.assertEqual(self.call('/api/rooms/general','DELETE',{})[0],400)
+ def test_deferred_ai_marks_pending_without_waiting_for_provider(self):
+  rid=self.call('/api/ai/room','POST',{})[1]['id']
+  result=self.call('/api/rooms/'+rid+'/messages','POST',{'text':'Crie uma ideia','defer_ai':True})
+  self.assertEqual(result[0],200);self.assertTrue(result[1]['ai_pending'])
+  self.assertEqual(len(self.call('/api/rooms/'+rid+'/messages')[1]['messages']),1)
  def test_story_viewers_are_private_even_from_master(self):
   sid=self.story();url='/api/stories/'+sid
   self.call(url+'/view','POST',{},who='alice');self.call(url+'/view','POST',{},who='bob');self.call(url+'/view','POST',{},who='bob')

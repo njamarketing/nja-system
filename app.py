@@ -457,7 +457,11 @@ def api(c,environ,method,path,d,q):
         audit(c,u,'event_update',id);return {'ok':True},headers
     if path=='/api/rooms' and method=='GET':
         need(u,'chats');result=[]
-        for r in c.execute('SELECT rooms.*,room_members.last_read FROM rooms JOIN room_members ON rooms.id=room_members.room_id WHERE room_members.user_id=? ORDER BY rooms.created',(u['id'],)):
+        for r in c.execute('''SELECT rooms.*,room_members.last_read FROM rooms
+          JOIN room_members ON rooms.id=room_members.room_id
+          WHERE room_members.user_id=? AND NOT EXISTS(
+            SELECT 1 FROM room_deletions d WHERE d.user_id=? AND d.room_id=rooms.id)
+          ORDER BY rooms.created''',(u['id'],u['id'])):
             if r['client_id'] and not agency_access.allowed(c,u,r['client_id']):continue
             x=dict(r);x.update(teamwork.serialize(sys.modules[__name__],c,u,r));x['archived']=bool(c.execute('SELECT 1 FROM room_archives WHERE user_id=? AND room_id=?',(u['id'],r['id'])).fetchone());x['members']=[v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r['id'],))];x['unread']=c.execute('SELECT count(*) FROM messages WHERE room_id=? AND created>? AND user_id<>?',(r['id'],r['last_read'],u['id'])).fetchone()[0];last=c.execute('SELECT text,created FROM messages WHERE room_id=? ORDER BY created DESC,rowid DESC LIMIT 1',(r['id'],)).fetchone();x['last']=dict(last) if last else None;result.append(x)
         return result,headers
@@ -467,7 +471,9 @@ def api(c,environ,method,path,d,q):
             if len(members)!=1 or members[0]==u['id']:raise Error(400,'Escolha outro usuário.')
             for r in c.execute("SELECT rooms.id FROM rooms JOIN room_members ON room_members.room_id=rooms.id WHERE rooms.kind='direct' AND room_members.user_id=?",(u['id'],)):
                 existing={v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r[0],))}
-                if existing=={u['id'],members[0]}:return {'id':r[0]},headers
+                if existing=={u['id'],members[0]}:
+                    c.execute('DELETE FROM room_deletions WHERE user_id=? AND room_id=?',(u['id'],r[0]))
+                    return {'id':r[0]},headers
             name='Conversa direta'
         elif kind=='group':need(u,'chat_manage');name=textfield(d,'name',True,120)
         else:raise Error(400,'Tipo inválido.')
@@ -478,6 +484,11 @@ def api(c,environ,method,path,d,q):
         audit(c,u,'room_create',id,name);return {'id':id},headers
     if path.startswith('/api/rooms/'):
         parts=path.split('/');id=parts[3];room_access(c,u,id)
+        if len(parts)==4 and method=='DELETE':
+            r=c.execute('SELECT kind FROM rooms WHERE id=?',(id,)).fetchone()
+            if r['kind']=='general':raise Error(400,'A conversa geral da equipe não pode ser excluída.')
+            c.execute('INSERT OR REPLACE INTO room_deletions(user_id,room_id,deleted) VALUES(?,?,?)',(u['id'],id,now()))
+            audit(c,u,'room_delete_for_user',id);return {'ok':True},headers
         if len(parts)==4 and method=='PATCH':
             need(u,'chat_manage');r=c.execute('SELECT * FROM rooms WHERE id=?',(id,)).fetchone()
             if r['kind']!='group':raise Error(400,'Participantes deste tipo de conversa não podem ser alterados.')
@@ -491,17 +502,24 @@ def api(c,environ,method,path,d,q):
         if len(parts)==5 and parts[4]=='messages':
             if method=='GET':
                 rows=[dict(r) for r in c.execute('SELECT messages.*,users.name,users.photo FROM messages JOIN users ON users.id=messages.user_id WHERE room_id=? ORDER BY messages.rowid DESC LIMIT 200',(id,))];rows.reverse()
+                interaction_updates.mark_delivered(c,id,u['id'],now())
                 interaction_updates.add_quotes(sys.modules[__name__],c,id,rows)
+                interaction_updates.add_receipts(c,rows)
                 return {'messages':rows,'files':[dict(r) for r in c.execute('SELECT f.id,f.name,f.mime,f.size,f.user_id,f.created,t.text AS transcript,t.status AS transcript_status FROM files f LEFT JOIN audio_transcripts t ON t.file_id=f.id WHERE room_id=? AND id NOT IN (SELECT photo FROM rooms WHERE photo IS NOT NULL) ORDER BY f.created',(id,))]},headers
             if method=='POST':
                 reply=interaction_updates.validate_reply(sys.modules[__name__],c,id,d)
                 tx=textfield(d,'text',True,5000);mid=uid();c.execute('INSERT INTO messages VALUES(?,?,?,?,?)',(mid,id,u['id'],tx,now()))
+                interaction_updates.prepare_receipts(c,id,mid,u['id'])
+                c.execute('DELETE FROM room_deletions WHERE room_id=?',(id,))
                 if reply:c.execute('INSERT INTO message_replies VALUES(?,?,?)',(mid,*reply))
                 for m in c.execute('SELECT user_id FROM room_members WHERE room_id=? AND user_id<>?',(id,u['id'])):notify(c,m[0],u['name'],tx,'chats:'+id,'messages')
                 notify_mentions(c,u,d,tx,'chats:'+id,'messages',[r[0] for r in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(id,))])
+                if d.get('defer_ai') is True and integrations.wants_response(sys.modules[__name__],c,u,id,tx):
+                    return {'id':mid,'ai_pending':True},headers
                 return {'id':mid}|integrations.maybe_respond(sys.modules[__name__],c,u,id,tx),headers
         if len(parts)==5 and parts[4]=='read' and method=='POST':
-            c.execute('UPDATE room_members SET last_read=? WHERE room_id=? AND user_id=?',(now(),id,u['id']));return {'ok':True},headers
+            stamp=now();c.execute('UPDATE room_members SET last_read=? WHERE room_id=? AND user_id=?',(stamp,id,u['id']))
+            interaction_updates.mark_read(c,id,u['id'],stamp);return {'ok':True},headers
     if path=='/api/notifications' and method=='GET':
         need(u,'notifications');return [dict(r) for r in c.execute('SELECT * FROM notifications WHERE user_id=? ORDER BY rowid DESC LIMIT 100',(u['id'],)) if agency_access.notification_allowed(sys.modules[__name__],c,u,r['link'])],headers
     if path=='/api/notifications/read' and method=='POST':
@@ -653,7 +671,11 @@ def stream(user_id,session_token):
     for _ in range(12):
         with connect() as c:
             if not c.execute('SELECT 1 FROM users JOIN sessions ON users.id=sessions.user_id WHERE users.id=? AND users.active=1 AND sessions.token=? AND sessions.expires>?',(user_id,session_token,time.time())).fetchone():return
-            v=c.execute('SELECT COALESCE(MAX(id),0) FROM audit').fetchone()[0]+c.execute('SELECT count(*) FROM messages').fetchone()[0]+c.execute('SELECT count(*) FROM notifications WHERE user_id=?',(user_id,)).fetchone()[0]
+            v=(c.execute('SELECT COALESCE(MAX(id),0) FROM audit').fetchone()[0]
+               +c.execute('SELECT count(*) FROM messages').fetchone()[0]
+               +c.execute('SELECT count(*) FROM notifications WHERE user_id=?',(user_id,)).fetchone()[0]
+               +c.execute('SELECT count(*) FROM message_receipts WHERE delivered IS NOT NULL').fetchone()[0]
+               +c.execute('SELECT count(*) FROM message_receipts WHERE read IS NOT NULL').fetchone()[0])
         if v!=last:yield ('event: refresh\ndata: {}\n\n').encode();last=v
         else:yield b': heartbeat\n\n'
         time.sleep(5)

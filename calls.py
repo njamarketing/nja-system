@@ -16,6 +16,15 @@ def ice(a):
         return servers
     except Exception:raise a.Error(503,'Configuração de chamadas inválida. Confira NJA_ICE_SERVERS no servidor.')
 
+def ice_response(a):
+    """Return ICE servers and whether a relay is available for restrictive/mobile networks."""
+    servers=ice(a)
+    urls=[]
+    for server in servers:
+        value=server.get('urls',[])
+        urls.extend([value] if isinstance(value,str) else value)
+    return {'ice_servers':servers,'turn_ready':any(url.startswith(('turn:','turns:')) for url in urls)}
+
 def expire(c):
     c.execute("UPDATE calls SET status='missed' WHERE status='ringing' AND expires<?",(time.time(),))
     c.execute("UPDATE calls SET status='ended' WHERE status='accepted' AND expires<?",(time.time(),))
@@ -37,7 +46,7 @@ def api(a,c,u,method,path,d,q):
         for r in c.execute("SELECT * FROM calls WHERE (caller=? OR callee=?) AND status IN ('ringing','accepted') ORDER BY created DESC",(u['id'],u['id'])).fetchall():
             try:allowed(a,c,u,r['id']);rows.append(dict(r))
             except a.Error:pass
-        return {'calls':rows,'ice_servers':ice(a)}
+        return {'calls':rows}|ice_response(a)
     if path=='/api/calls' and method=='POST':
         rid=d.get('room_id');a.room_access(c,u,rid);other=d.get('callee');mode=d.get('mode')
         if mode not in ['audio','video']:raise a.Error(400,'Tipo de chamada inválido.')
@@ -48,7 +57,7 @@ def api(a,c,u,method,path,d,q):
             if c.execute("SELECT 1 FROM meeting_members p JOIN meetings m ON m.id=p.meeting_id WHERE p.user_id=? AND m.status='active' AND m.expires>? AND (p.status='joined' OR (p.status='invited' AND p.invited>?))",(person,time.time(),time.time()-60)).fetchone():raise a.Error(409,'Um participante já está em uma reunião.')
         if c.execute("SELECT 1 FROM calls WHERE status IN ('ringing','accepted') AND (caller IN (?,?) OR callee IN (?,?))",(u['id'],other,u['id'],other)).fetchone():raise a.Error(409,'Você ou o participante já tem uma chamada em andamento.')
         id=a.uid();c.execute('INSERT INTO calls VALUES(?,?,?,?,?,?,?,?)',(id,rid,u['id'],other,mode,'ringing',time.time(),time.time()+60));a.notify(c,other,u['name'],'Chamada de '+('vídeo' if mode=='video' else 'voz'),'chats:'+rid,'messages');a.audit(c,u,'call_start',id)
-        return {'call':dict(c.execute('SELECT * FROM calls WHERE id=?',(id,)).fetchone()),'ice_servers':ice(a)}
+        return {'call':dict(c.execute('SELECT * FROM calls WHERE id=?',(id,)).fetchone())}|ice_response(a)
     parts=path.split('/')
     if len(parts)<4:raise a.Error(404,'Chamada não encontrada.')
     id=parts[3];call=allowed(a,c,u,id)
@@ -71,9 +80,10 @@ def api(a,c,u,method,path,d,q):
         if method=='POST':
             if call['status'] not in ['ringing','accepted']:raise a.Error(409,'Chamada encerrada.')
             kind=d.get('kind');payload=d.get('payload')
-            if kind not in ['offer','answer','candidate'] or not isinstance(payload,dict) or len(json.dumps(payload))>120000:raise a.Error(400,'Sinal inválido.')
+            if kind not in ['offer','answer','candidate','restart'] or not isinstance(payload,dict) or len(json.dumps(payload))>120000:raise a.Error(400,'Sinal inválido.')
             if kind=='offer' and u['id']!=call['caller']:raise a.Error(403,'Oferta inválida.')
             if kind=='answer' and (u['id']!=call['callee'] or call['status']!='accepted'):raise a.Error(403,'Resposta inválida.')
+            if kind=='restart' and call['status']!='accepted':raise a.Error(409,'A chamada ainda não foi atendida.')
             if kind in ['offer','answer'] and (payload.get('type')!=kind or not isinstance(payload.get('sdp'),str)):raise a.Error(400,'SDP inválido.')
             if kind=='candidate' and not isinstance(payload.get('candidate'),str):raise a.Error(400,'Candidato inválido.')
             if c.execute('SELECT COUNT(*) FROM call_signals WHERE call_id=?',(id,)).fetchone()[0]>=1000:raise a.Error(429,'Limite de sinalização atingido.')

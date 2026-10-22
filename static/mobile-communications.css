@@ -12,6 +12,11 @@
 .birthday-conversation-notice .avatar{width:26px;height:26px;flex:0 0 26px}
 .birthday-conversation-notice strong{font-weight:500}
 .birthday-conversation-notice .birthday-pill{margin-left:auto;white-space:nowrap}
+.mobile-chat-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;min-width:0}
+.mobile-chat-actions .group-actions{display:flex;gap:6px}
+.archive-symbol{display:inline-flex;width:19px;height:19px;align-items:center;justify-content:center}
+.archive-symbol svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.archive-label{margin-left:6px}
 
 /* Phone screens preserve media nodes while moving from ringing to connected. */
 .phone-call-screen{background:radial-gradient(ellipse at 50% 25%,#234b66,#0b1729 68%);color:#f4f9ff;border:1px solid #29415b;overflow:auto;isolation:isolate}
@@ -32,8 +37,16 @@
 .phone-call-screen .call-videos{min-height:0;flex:1}
 .phone-call-screen[data-mode=video][data-phase=connecting] .call-videos{flex:0 0 100px;max-height:100px}
 .phone-call-screen .call-controls{flex:0 0 auto;gap:12px;padding:18px 0 4px;align-items:stretch;justify-content:center}
-.phone-call-screen .call-controls .btn{background:#ffffff13;color:#edf8ff;border:1px solid #ffffff18;max-width:155px;flex:1;padding:15px 10px;font-size:12px;min-height:56px;border-radius:20px}
-.phone-call-screen .call-controls .danger{background:#d93650;color:white;border-color:#ef6478}
+.call-controls,.meeting-controls{display:flex;align-items:flex-end;justify-content:center;gap:10px;flex-wrap:wrap}
+.call-action{display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:6px;min-width:68px;max-width:105px;padding:0 4px;background:transparent;color:#d9ebf6;border:0;font-size:10px;line-height:1.2;text-align:center}
+.call-action[hidden]{display:none!important}
+.call-action-icon{display:flex;align-items:center;justify-content:center;width:48px;height:48px;border-radius:16px;background:#ffffff14;border:1px solid #ffffff18;color:#effaff;transition:background .15s,transform .15s}
+.call-action-icon .ico,.call-action-icon svg{width:21px;height:21px}
+.call-action:hover .call-action-icon,.call-action:focus-visible .call-action-icon{background:#ffffff26;transform:translateY(-2px)}
+.call-action.is-off .call-action-icon{background:#eef3f8;color:#26384a}.call-action.is-active .call-action-icon{background:#4e42d5;color:#fff}
+.call-action.danger .call-action-icon{background:#b52d43;border-color:#df5368;color:#fff;border-radius:18px}
+.call-network-note{flex:0 0 auto;margin:5px auto;padding:8px 13px;max-width:620px;border:1px solid #dfb56155;border-radius:12px;background:#8f650f24;color:#f5d995;font-size:11px;text-align:center}
+#call-restore,#meeting-restore{display:none;border:1px solid #ffffff2b;background:#ffffff17;color:#fff;border-radius:10px;padding:7px 10px;font-size:10px}
 .phone-incoming-screen{width:min(460px,calc(100vw - 32px));max-width:none;max-height:92dvh;overflow:auto;background:radial-gradient(ellipse at 50% 20%,#254e69,#0b1729 75%);color:#fff;border:1px solid #36516b;border-radius:30px;padding:45px 26px;text-align:center;box-shadow:0 0 0 100vmax #071222c9;z-index:95}
 .phone-incoming-screen>.avatar{position:relative;display:flex;align-items:center;justify-content:center;margin:25px auto;width:140px!important;height:140px!important;border-radius:50%;object-fit:cover;font-size:35px;background:#25526c;color:#dbf8ff;box-shadow:0 0 0 12px #84c9d511,0 0 0 25px #84c9d508}
 .phone-incoming-screen h2{font-size:25px;line-height:1.4;overflow-wrap:anywhere;margin:15px 0}
@@ -59,6 +72,7 @@
 .phone-meeting-screen>header h2{font-size:17px;overflow-wrap:anywhere}
 .phone-meeting-screen>header>span{font-size:11px;color:#a8d1e4}
 .phone-meeting-screen .meeting-controls{flex:0 0 auto}
+.phone-meeting-screen .meeting-controls .call-action{color:#d9ebf6}
 .meeting-avatar{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding-bottom:30px}
 .meeting-avatar .avatar{display:flex;align-items:center;justify-content:center;width:80px;height:80px;object-fit:cover;border-radius:50%;font-size:25px;background:#25475f;color:#d1ebfa}
 .phone-meeting-screen .meeting-tile video{position:relative;z-index:1}
@@ -66,6 +80,7 @@
 .phone-meeting-screen .meeting-tile:not(.has-video) video{opacity:0}
 .phone-group-incoming .phone-group-portraits{max-height:35dvh;overflow:auto;grid-template-columns:repeat(3,minmax(0,1fr))}
 body:has(.phone-call-screen,.phone-incoming-screen,.phone-meeting-screen){overflow:hidden}
+body.call-chat-visible{overflow:auto}
 body:has(.phone-call-screen,.phone-incoming-screen,.phone-meeting-screen) .ninja-companion{visibility:hidden}
 @keyframes phone-ring-pulse{0%{transform:scale(.95);opacity:.9}100%{transform:scale(1.22);opacity:0}}
 @keyframes phone-ring-glow{50%{outline-color:#a0f3d8;outline-offset:7px}}
@@ -88,12 +103,16 @@ body:has(.phone-call-screen,.phone-incoming-screen,.phone-meeting-screen) .ninja
  .chat-layout.mobile-conversation-open>.rooms{display:none!important}
  .chat-layout.mobile-conversation-open>.conversation{display:flex!important;flex:1 1 auto!important;height:100%!important;min-height:0!important;min-width:0;width:100%;overflow:hidden}
  .chat-layout.mobile-conversation-open #mobile-chat-back{display:inline-flex;align-items:center;justify-content:center;flex:0 0 32px;font-size:25px}
- .conversation-head{flex:0 0 auto;flex-wrap:wrap;gap:5px!important;padding:calc(8px + env(safe-area-inset-top)) 8px 8px!important;min-width:0}
- .conversation-head>.grow{min-width:75px;flex:1 1 75px}
+ .conversation-head{flex:0 0 auto;display:grid!important;grid-template-columns:34px 40px minmax(0,1fr);align-items:center;gap:6px!important;padding:calc(8px + env(safe-area-inset-top)) 8px 8px!important;min-width:0}
+ .conversation-head>.avatar{grid-column:2;grid-row:1;width:36px;height:36px}
+ .conversation-head>.grow{grid-column:3;grid-row:1;min-width:0}
  .conversation-head h3{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px}
- .conversation-head .group-actions{display:flex;flex:0 0 auto;gap:3px}
+ .conversation-head .mobile-chat-actions{grid-column:1/-1;grid-row:2;display:grid;grid-template-columns:repeat(auto-fit,minmax(38px,1fr));gap:5px;width:100%;padding-top:3px;border-top:1px solid #edf1f5}
+ .conversation-head .mobile-chat-actions .group-actions{display:contents}
  .conversation-head .iconbtn,.conversation-head .call-button{min-width:30px;width:30px;min-height:34px;padding:5px!important;margin:0!important}
- .conversation-head>.btn{font-size:10px;padding:6px}
+ .conversation-head .mobile-chat-actions>.iconbtn,.conversation-head .mobile-chat-actions>.call-button,.conversation-head .mobile-chat-actions .group-actions>.iconbtn{width:100%;min-width:0;min-height:38px;display:flex;align-items:center;justify-content:center}
+ .conversation-head .mobile-chat-actions>.btn{font-size:10px;padding:6px;min-height:38px;max-width:none}
+ .conversation-head .archive-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
  .conversation-head>small,.conversation-head .grow small{font-size:10px;overflow-wrap:anywhere}
  .conversation .messages{flex:1 1 0;min-height:0!important;min-width:0;overflow-y:auto;overflow-x:hidden;padding:13px 10px;overscroll-behavior:contain;scrollbar-width:thin}
  .conversation .message{max-width:88%;min-width:0;flex:0 0 auto}
@@ -127,15 +146,25 @@ body:has(.phone-call-screen,.phone-incoming-screen,.phone-meeting-screen) .ninja
  .phone-incoming-screen>.avatar{flex:0 0 140px;margin:25px auto}
  .phone-incoming-screen .inline-actions{margin-top:25px;width:100%;flex:0 0 auto;gap:20px}
  .phone-call-screen .phone-person-host{min-height:150px;padding:16px 0}
- .phone-call-screen .call-controls{gap:8px;padding-top:15px}
- .phone-call-screen .call-controls .btn{font-size:11px;padding:12px 7px}
+ .phone-call-screen .call-controls{display:flex;flex-wrap:nowrap;justify-content:flex-start;gap:4px;padding:12px 0 2px;overflow-x:auto;scrollbar-width:none}
+ .phone-call-screen .call-controls::-webkit-scrollbar,.phone-meeting-screen .meeting-controls::-webkit-scrollbar{display:none}
+ .call-action{min-width:58px;font-size:9px;padding:0 2px}.call-action-icon{width:44px;height:44px;border-radius:15px}
  .phone-meeting-screen .meeting-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:10px 0}
  .phone-meeting-screen .meeting-tile{min-height:150px}.phone-meeting-screen .meeting-tile video{max-height:35dvh}
- .phone-meeting-screen .meeting-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.phone-meeting-screen .meeting-controls .btn{font-size:11px;min-height:46px;padding:9px;min-width:0}
+ .phone-meeting-screen .meeting-controls{display:flex;flex-wrap:nowrap;justify-content:flex-start;gap:4px;overflow-x:auto;padding:10px 0 2px}
  .phone-group-portraits{gap:14px 10px;grid-template-columns:repeat(3,minmax(0,1fr))}
  .phone-meeting-screen.group-ringing .phone-group-portraits,.phone-meeting-screen.audio-meeting .phone-group-portraits{grid-template-columns:repeat(2,minmax(0,1fr));min-height:0}
  .phone-meeting-screen.group-ringing .phone-group-person .avatar,.phone-meeting-screen.audio-meeting .phone-group-person .avatar{width:clamp(60px,18vw,95px)!important;height:clamp(60px,18vw,95px)!important}
  .phone-group-incoming>.avatar{display:none}.phone-group-incoming .phone-group-portraits{max-height:52dvh}
+ .phone-call-screen.call-chat-mode,.phone-meeting-screen.call-chat-mode{left:auto!important;right:10px!important;top:calc(var(--mobile-visible-top,0px) + env(safe-area-inset-top) + 10px)!important;width:170px!important;max-width:170px!important;height:150px!important;max-height:150px!important;padding:8px!important;border:1px solid #ffffff2c!important;border-radius:18px!important;box-shadow:0 8px 35px #07122266;overflow:hidden!important}
+ .call-chat-mode .phone-person-host,.call-chat-mode .phone-group-portraits,.call-chat-mode .meeting-roster,.call-chat-mode .call-controls,.call-chat-mode .meeting-controls,.call-chat-mode .call-network-note,.call-chat-mode #local-video{display:none!important}
+ .phone-call-screen.call-chat-mode>header,.phone-meeting-screen.call-chat-mode>header{position:absolute;left:6px;right:6px;bottom:6px;z-index:5;display:flex;flex-direction:column;gap:4px;padding:6px;border-radius:10px;background:#071222b8}
+ .phone-call-screen.call-chat-mode>header>div,.phone-meeting-screen.call-chat-mode>header h2{display:none}
+ .call-chat-mode #call-status,.call-chat-mode #meeting-summary{font-size:9px;line-height:1.2}
+ .call-chat-mode #call-restore,.call-chat-mode #meeting-restore{display:block;width:100%}
+ .phone-call-screen.call-chat-mode .call-videos,.phone-meeting-screen.call-chat-mode .meeting-grid{display:block!important;position:absolute;inset:0;min-height:0!important;padding:0!important;overflow:hidden}
+ .phone-call-screen.call-chat-mode #remote-video,.phone-meeting-screen.call-chat-mode .meeting-tile:first-child video{display:block;width:100%;height:100%;object-fit:cover}
+ .phone-meeting-screen.call-chat-mode .meeting-tile{display:none}.phone-meeting-screen.call-chat-mode .meeting-tile:first-child{display:block;height:100%;border:0;border-radius:0}
 }
 @media(max-width:760px) and (max-height:480px){.phone-call-screen .phone-person{gap:5px;flex-direction:row;flex-wrap:wrap;justify-content:center}.phone-call-screen .phone-person .avatar{width:75px;height:75px;font-size:24px}.phone-call-screen .phone-person-host{min-height:90px;padding:8px}.phone-person h2{font-size:20px}.phone-ring-symbol{display:none}.phone-incoming-screen{gap:4px;padding:12px}.phone-incoming-screen>.avatar{width:80px!important;height:80px!important;flex-basis:80px;margin:5px}.phone-incoming-screen h2{font-size:19px;margin:5px}.phone-incoming-screen .inline-actions{margin-top:5px}.phone-incoming-screen .inline-actions .btn{min-height:45px}.phone-group-incoming .phone-group-portraits{padding:5px;gap:5px}.phone-group-person .avatar{width:42px!important;height:42px!important}}
 @media(prefers-reduced-motion:reduce){.phone-avatar-halo:after,.phone-incoming-screen>.avatar:after,.phone-group-person.is-ringing .avatar{animation:none!important}}

@@ -45,7 +45,7 @@ def api(a,c,u,method,path,d,q):
         for m in c.execute(sql+' ORDER BY m.created',(u['id'],rid) if rid else (u['id'],)).fetchall():
             try:access(a,c,u,m['id']);out.append(serialize(c,m,u))
             except a.Error:pass
-        return {'meetings':out,'ice_servers':calls.ice(a),'max_people':MAX_PEOPLE}
+        return {'meetings':out,'max_people':MAX_PEOPLE}|calls.ice_response(a)
     if path=='/api/meetings' and method=='POST':
         rid=d.get('room_id');a.room_access(c,u,rid)
         room=c.execute('SELECT * FROM rooms WHERE id=?',(rid,)).fetchone()
@@ -61,7 +61,7 @@ def api(a,c,u,method,path,d,q):
         id=a.uid();ts=time.time();c.execute('INSERT INTO meetings VALUES(?,?,?,?,?,?,?)',(id,rid,u['id'],d['mode'],'active',ts,ts+7200))
         for person in members+[u['id']]:c.execute('INSERT INTO meeting_members VALUES(?,?,?,?,?)',(id,person,'joined' if person==u['id'] else 'invited',ts if person==u['id'] else 0,ts))
         for person in members:a.notify(c,person,u['name'],'Convidou você para uma reunião de '+('vídeo' if d['mode']=='video' else 'voz'),'chats:'+rid,'messages')
-        a.audit(c,u,'meeting_start',id);return {'meeting':serialize(c,c.execute('SELECT * FROM meetings WHERE id=?',(id,)).fetchone(),u),'ice_servers':calls.ice(a)}
+        a.audit(c,u,'meeting_start',id);return {'meeting':serialize(c,c.execute('SELECT * FROM meetings WHERE id=?',(id,)).fetchone(),u)}|calls.ice_response(a)
     parts=path.split('/')
     if len(parts)<4:raise a.Error(404,'Reunião não encontrada.')
     id=parts[3];meeting,member=access(a,c,u,id)

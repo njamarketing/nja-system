@@ -73,7 +73,7 @@ class EnterpriseTest(unittest.TestCase):
   self.assertEqual(self.call('/api/rooms/'+rid+'/messages',who='alice')[1]['files'][0]['mime'],'audio/wav')
   self.assertEqual(self.call('/api/audio/'+fid+'/transcribe','POST',{},who='alice')[0],503)
  def test_calls_signals_acl_busy_and_end(self):
-  st,r,_=self.call('/api/calls','POST',{'room_id':'general','callee':'alice','mode':'video'});self.assertEqual(st,200);cid=r['call']['id']
+  st,r,_=self.call('/api/calls','POST',{'room_id':'general','callee':'alice','mode':'video'});self.assertEqual(st,200);self.assertFalse(r['turn_ready']);cid=r['call']['id']
   self.assertEqual(self.call('/api/calls/'+cid+'/signals',who='bob')[0],403)
   self.assertEqual(self.call('/api/calls','POST',{'room_id':'general','callee':'alice','mode':'audio'},who='bob')[0],409)
   self.assertEqual(self.call('/api/calls/'+cid+'/action','POST',{'action':'accept'})[0],409)
@@ -83,6 +83,8 @@ class EnterpriseTest(unittest.TestCase):
   self.assertEqual(self.call('/api/calls/'+cid+'/signals','POST',{'kind':'answer','payload':{'type':'answer','sdp':'test'}},who='alice')[0],200)
   self.assertEqual(self.call('/api/calls/'+cid+'/signals','POST',{'kind':'candidate','payload':{'candidate':'candidate:x'}},who='alice')[0],200)
   signals=self.call('/api/calls/'+cid+'/signals')[1]['signals'];self.assertEqual(len(signals),2)
+  self.assertEqual(self.call('/api/calls/'+cid+'/signals','POST',{'kind':'restart','payload':{}},who='alice')[0],200)
+  self.assertEqual(self.call('/api/calls/'+cid+'/signals','POST',{'kind':'restart','payload':{}})[0],200)
   self.assertEqual(self.call('/api/calls/'+cid+'/action','POST',{'action':'end'},who='alice')[0],200)
   self.assertEqual(self.call('/api/calls')[1]['calls'],[])
   self.assertEqual(self.call('/api/calls/'+cid+'/signals','POST',{'kind':'offer','payload':{}})[0],409)

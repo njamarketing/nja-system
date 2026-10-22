@@ -22,6 +22,8 @@ def init(c):
  ''')
  # Sales is opt-in; no existing user gains new business permissions on migration.
  c.execute('INSERT OR IGNORE INTO roles VALUES(?,?,?)',('sales','Comercial',json.dumps(['dashboard','tasks','calendar','chats','team','notifications','task_create','task_edit','task_complete','clients','client_manage','crm','crm_edit','crm_reply','crm_convert'])))
+ import zapsign
+ zapsign.init(c)
 
 def money(a,value):
  try:
@@ -89,6 +91,9 @@ def api(a,c,u,method,path,d,q):
   if method=='POST' and id=='whatsapp':
    owner=d.get('owner');person(a,c,owner,True)
    c.execute('INSERT OR REPLACE INTO company_settings VALUES(?,?)',('whatsapp_owner',owner));a.audit(c,u,'whatsapp_owner','config');return {'ok':True}
+ if resource=='zapsign':
+  import zapsign
+  return zapsign.api(a,c,u,method,parts[1:],d,q)
  if resource=='documents' and id:
   r=c.execute('SELECT * FROM business_documents WHERE id=?',(id,)).fetchone()
   if not r:raise a.Error(404,'Documento não encontrado.')

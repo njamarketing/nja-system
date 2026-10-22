@@ -36,6 +36,7 @@ def status(a,c):
  {'id':'itau','name':'Itaú','ready':False,'detail':'Controle manual e PDFs disponíveis. Sincronização aguarda contratação/habilitação e documentação da API específica da conta.'},
  {'id':'infinitepay','name':'InfinitePay','ready':False,'detail':'Controle manual e PDFs disponíveis. API pública de checkout não equivale à consulta geral de faturas; sincronização geral ainda indisponível.'},
  {'id':'whatsapp','name':'WhatsApp Business','ready':all(os.getenv(k) for k in ['WHATSAPP_TOKEN','WHATSAPP_PHONE_ID','META_APP_SECRET','WHATSAPP_VERIFY_TOKEN','META_GRAPH_VERSION']),'detail':'Webhook com assinatura, origem de anúncio e chat de texto com janela de atendimento.'},
+ {'id':'zapsign','name':'ZapSign','ready':bool(os.getenv('ZAPSIGN_API_TOKEN')),'detail':'Documentos, signatários, modelos e estados de assinatura integrados à carteira de contratos. Ambiente: '+os.getenv('ZAPSIGN_ENV','production')},
  {'id':'meta','name':'Facebook e Instagram','ready':bool(os.getenv('META_GRAPH_VERSION') and os.getenv('META_ACCESS_TOKEN')),'detail':'Publicação em página/Instagram configurados; consulta e pausa/ativação de campanhas da conta configurada.'}], 'whatsapp_owner':enterprise.setting(c,'whatsapp_owner'), 'runs':[dict(r) for r in c.execute('SELECT * FROM connector_runs')], 'webhook':a.ORIGIN+'/webhooks/whatsapp'}
 
 def cora(a,path,token=None,body=None):

@@ -1,5 +1,6 @@
 .env
 .env.release
+configuracao-local.bat
 .venv/
 data/
 __pycache__/

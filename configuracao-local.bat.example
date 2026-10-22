@@ -39,3 +39,7 @@ set "WHATSAPP_TOKEN="
 set "WHATSAPP_PHONE_ID="
 set "WHATSAPP_VERIFY_TOKEN="
 set "META_APP_SECRET="
+
+rem ZapSign - documentos e assinaturas dos contratos
+set "ZAPSIGN_ENV=production"
+set "ZAPSIGN_API_TOKEN="

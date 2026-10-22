@@ -156,7 +156,9 @@ def api(a,c,u,method,path,d,q):
         a.need(u,'clients')
         if not client:raise a.Error(400,'Selecione um cliente cadastrado.')
         agency_access.need(a,c,u,client['id'])
-        c.execute('UPDATE rooms SET client_id=?,photo=?,cover=?,project=? WHERE id=?',(client['id'],client['photo'],client['cover'],client['name'],id));a.audit(c,u,'room_brand',id);return {'ok':True}
+        c.execute('UPDATE rooms SET client_id=?,photo=?,cover=?,project=? WHERE id=?',(client['id'],client['photo'],client['cover'],client['name'],id))
+        c.execute('INSERT OR IGNORE INTO client_team SELECT ?,user_id FROM room_members WHERE room_id=?',(client['id'],id))
+        a.audit(c,u,'room_brand',id);return {'ok':True}
     if path.startswith('/api/rooms/') and path.endswith('/reactions'):
         rid=path.split('/')[3];a.room_access(c,u,rid)
         if method=='GET':return [dict(r) for r in c.execute('SELECT r.* FROM message_reactions r JOIN messages m ON m.id=r.message_id WHERE m.room_id=?',(rid,))]

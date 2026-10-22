@@ -136,7 +136,7 @@ def respond(a,c,u,rid,prompt=''):
         # Recheck membership and enabled status after external latency.
         a.room_access(c,u,rid)
         if not c.execute('SELECT ai_enabled FROM rooms WHERE id=?',(rid,)).fetchone()[0]:raise a.Error(409,'A IA foi desativada durante a resposta.')
-        bot_init(a,c);mid=a.uid();c.execute('INSERT INTO messages VALUES(?,?,?,?,?)',(mid,rid,BOT,text[:12000],a.now()));c.execute("UPDATE ai_jobs SET status='done' WHERE id=?",(job,));a.audit(c,u,'ai_response',rid)
+        bot_init(a,c);mid=a.uid();c.execute('INSERT INTO messages(id,room_id,user_id,text,created) VALUES(?,?,?,?,?)',(mid,rid,BOT,text[:12000],a.now()));c.execute("UPDATE ai_jobs SET status='done' WHERE id=?",(job,));a.audit(c,u,'ai_response',rid)
         for m in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(rid,)):a.notify(c,m[0],'Ninja IA',text[:500],'chats:'+rid,'messages')
         c.commit();return {'id':mid}
     except a.Error as e:

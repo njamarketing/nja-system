@@ -102,5 +102,5 @@ def api(a,c,u,method,path,d,q):
   a.room_access(c,u,rid)
   c.execute('DELETE FROM room_archives WHERE room_id=? AND user_id IN (?,?)',(rid,u['id'],target['id']))
   text='Resposta à história de '+target['name']+' ('+s['created']+')'+('\n'+s['text'][:500] if s['text'] else '')+'\n\n'+tx
-  c.execute('INSERT INTO messages VALUES(?,?,?,?,?)',(a.uid(),rid,u['id'],text,a.now()));a.notify(c,target['id'],u['name']+' respondeu sua história',tx,'chats:'+rid,'messages');a.audit(c,u,'story_reply',s['id']);return {'room_id':rid}
+  c.execute('INSERT INTO messages(id,room_id,user_id,text,created) VALUES(?,?,?,?,?)',(a.uid(),rid,u['id'],text,a.now()));a.notify(c,target['id'],u['name']+' respondeu sua história',tx,'chats:'+rid,'messages');a.audit(c,u,'story_reply',s['id']);return {'room_id':rid}
  return None

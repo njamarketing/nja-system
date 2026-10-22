@@ -6,7 +6,7 @@ class PortalTest(unittest.TestCase):
  tearDown=base.SystemTest.tearDown
  call=base.SystemTest.call
  def portal(self,path,method='GET',data=None,token=''):
-  raw=json.dumps(data or {}).encode();env={'REQUEST_METHOD':method,'PATH_INFO':'/api/portal/'+path,'QUERY_STRING':'','CONTENT_TYPE':'application/json','CONTENT_LENGTH':str(len(raw)),'wsgi.input':io.BytesIO(raw),'REMOTE_ADDR':'portal-test','HTTP_X_PORTAL_TOKEN':token};capture={}
+  route,_,query=path.partition('?');raw=json.dumps(data or {}).encode();env={'REQUEST_METHOD':method,'PATH_INFO':'/api/portal/'+route,'QUERY_STRING':query,'CONTENT_TYPE':'application/json','CONTENT_LENGTH':str(len(raw)),'wsgi.input':io.BytesIO(raw),'REMOTE_ADDR':'portal-test','HTTP_X_PORTAL_TOKEN':token};capture={}
   def response(status,headers):capture['status']=int(status.split()[0])
   result=json.loads(b''.join(app.application(env,response)));return capture['status'],result
  def setup_review(self):
@@ -36,3 +36,22 @@ class PortalTest(unittest.TestCase):
   self.assertEqual(self.call('/api/agency/portal/uploads/'+r[1]['id'])[0],200)
   self.assertEqual(self.call('/api/agency/portal/uploads/'+r[1]['id'],who='bob')[0],403)
   self.assertEqual(self.portal('files/unknown',token=token)[0],404)
+ def test_carousel_keeps_order_and_individual_captions(self):
+  from PIL import Image
+  cid=self.call('/api/clients','POST',{'name':'Cliente carrossel','entered':'2026-10-01','product':'Marketing'})[1]['id']
+  tid=self.call('/api/tasks','POST',{'title':'Carrossel','owner':'master','client_id':cid})[1]['id']
+  file_ids=[]
+  for color in ['red','blue']:
+   payload=io.BytesIO();Image.new('RGB',(20,20),color).save(payload,format='PNG')
+   upload=self.call('/api/upload','POST',{'task_id':tid,'name':color+'.png','data':base64.b64encode(payload.getvalue()).decode()})
+   self.assertEqual(upload[0],200,upload[1]);file_ids.append(upload[1]['id'])
+  created=self.call('/api/agency/reviews','POST',{'client_id':cid,'task_id':tid,'title':'Sequência','format':'carousel'})
+  self.assertEqual(created[0],200,created[1]);rid=created[1]['id']
+  self.assertEqual(self.call('/api/agency/reviews/'+rid+'/versions','POST',{'file_ids':file_ids,'captions':['Primeiro card','Segundo card'],'caption':'Legenda geral'})[0],200)
+  review=self.call('/api/agency/reviews/'+rid)[1]
+  self.assertEqual(review['format'],'carousel')
+  self.assertEqual([item['id'] for item in review['versions'][0]['files']],file_ids)
+  self.assertEqual([item['caption'] for item in review['versions'][0]['files']],['Primeiro card','Segundo card'])
+  self.assertEqual(self.call('/api/agency/reviews/'+rid+'/versions','POST',{'file_ids':file_ids,'captions':['Só uma']})[0],400)
+  image=self.call('/api/agency/reviews','POST',{'client_id':cid,'task_id':tid,'title':'Imagem única','format':'image'})[1]['id']
+  self.assertEqual(self.call('/api/agency/reviews/'+image+'/versions','POST',{'file_ids':file_ids,'captions':['A','B']})[0],400)

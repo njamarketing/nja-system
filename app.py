@@ -48,8 +48,13 @@ def verify_password(p,h):
         salt,want=h.split(':'); return hmac.compare_digest(hashlib.scrypt(p.encode(),salt=bytes.fromhex(salt),n=16384,r=8,p=1).hex(),want)
     except (ValueError,TypeError): return False
 
+class ClosingConnection(sqlite3.Connection):
+    def __exit__(self,exc_type,exc_value,traceback):
+        try:return super().__exit__(exc_type,exc_value,traceback)
+        finally:self.close()
+
 def connect():
-    c=sqlite3.connect(DB,timeout=20); c.row_factory=sqlite3.Row
+    c=sqlite3.connect(DB,timeout=20,factory=ClosingConnection); c.row_factory=sqlite3.Row
     c.execute('PRAGMA foreign_keys=ON'); c.execute('PRAGMA busy_timeout=20000')
     return c
 
@@ -463,7 +468,7 @@ def api(c,environ,method,path,d,q):
             SELECT 1 FROM room_deletions d WHERE d.user_id=? AND d.room_id=rooms.id)
           ORDER BY rooms.created''',(u['id'],u['id'])):
             if r['client_id'] and not agency_access.allowed(c,u,r['client_id']):continue
-            x=dict(r);x.update(teamwork.serialize(sys.modules[__name__],c,u,r));x['archived']=bool(c.execute('SELECT 1 FROM room_archives WHERE user_id=? AND room_id=?',(u['id'],r['id'])).fetchone());x['members']=[v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r['id'],))];x['unread']=c.execute('SELECT count(*) FROM messages WHERE room_id=? AND created>? AND user_id<>?',(r['id'],r['last_read'],u['id'])).fetchone()[0];last=c.execute('SELECT text,created FROM messages WHERE room_id=? ORDER BY created DESC,rowid DESC LIMIT 1',(r['id'],)).fetchone();x['last']=dict(last) if last else None;result.append(x)
+            x=dict(r);x.update(teamwork.serialize(sys.modules[__name__],c,u,r));x['archived']=bool(c.execute('SELECT 1 FROM room_archives WHERE user_id=? AND room_id=?',(u['id'],r['id'])).fetchone());x['members']=[v[0] for v in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(r['id'],))];x['unread']=c.execute("SELECT count(*) FROM messages WHERE room_id=? AND created>? AND COALESCE(user_id,'')<>?",(r['id'],r['last_read'],u['id'])).fetchone()[0];last=c.execute('SELECT text,created FROM messages WHERE room_id=? ORDER BY created DESC,rowid DESC LIMIT 1',(r['id'],)).fetchone();x['last']=dict(last) if last else None;result.append(x)
         return result,headers
     if path=='/api/rooms' and method=='POST':
         need(u,'chats');kind=d.get('kind','group');members=active_ids(c,d.get('members',[]))
@@ -495,20 +500,21 @@ def api(c,environ,method,path,d,q):
             members=active_ids(c,d.get('members',[m[0] for m in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(id,))]));members=list(set(members+[u['id']]))
             c.execute('DELETE FROM room_members WHERE room_id=?',(id,))
             for m in members:c.execute('INSERT INTO room_members(room_id,user_id) VALUES(?,?)',(id,m))
+            if r['client_id']:c.execute('INSERT OR IGNORE INTO client_team SELECT ?,user_id FROM room_members WHERE room_id=?',(r['client_id'],id))
             if 'name' in d:c.execute('UPDATE rooms SET name=? WHERE id=?',(textfield(d,'name',True,120),id))
             for field in ['project','description']:
                 if field in d:c.execute('UPDATE rooms SET '+field+'=? WHERE id=?',(textfield(d,field,False,2000 if field=='description' else 120),id))
             audit(c,u,'room_update',id);return {'ok':True},headers
         if len(parts)==5 and parts[4]=='messages':
             if method=='GET':
-                rows=[dict(r) for r in c.execute('SELECT messages.*,users.name,users.photo FROM messages JOIN users ON users.id=messages.user_id WHERE room_id=? ORDER BY messages.rowid DESC LIMIT 200',(id,))];rows.reverse()
+                rows=[dict(r) for r in c.execute("SELECT messages.*,COALESCE(users.name,messages.portal_name,'Cliente') AS name,users.photo FROM messages LEFT JOIN users ON users.id=messages.user_id WHERE room_id=? ORDER BY messages.rowid DESC LIMIT 200",(id,))];rows.reverse()
                 interaction_updates.mark_delivered(c,id,u['id'],now())
                 interaction_updates.add_quotes(sys.modules[__name__],c,id,rows)
                 interaction_updates.add_receipts(c,rows)
                 return {'messages':rows,'files':[dict(r) for r in c.execute('SELECT f.id,f.name,f.mime,f.size,f.user_id,f.created,t.text AS transcript,t.status AS transcript_status FROM files f LEFT JOIN audio_transcripts t ON t.file_id=f.id WHERE room_id=? AND id NOT IN (SELECT photo FROM rooms WHERE photo IS NOT NULL) ORDER BY f.created',(id,))]},headers
             if method=='POST':
                 reply=interaction_updates.validate_reply(sys.modules[__name__],c,id,d)
-                tx=textfield(d,'text',True,5000);mid=uid();c.execute('INSERT INTO messages VALUES(?,?,?,?,?)',(mid,id,u['id'],tx,now()))
+                tx=textfield(d,'text',True,5000);mid=uid();c.execute('INSERT INTO messages(id,room_id,user_id,text,created) VALUES(?,?,?,?,?)',(mid,id,u['id'],tx,now()))
                 interaction_updates.prepare_receipts(c,id,mid,u['id'])
                 c.execute('DELETE FROM room_deletions WHERE room_id=?',(id,))
                 if reply:c.execute('INSERT INTO message_replies VALUES(?,?,?)',(mid,*reply))

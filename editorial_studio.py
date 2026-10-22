@@ -72,7 +72,7 @@ def api(a,c,u,method,parts,d):
   rid=a.uid();number=1
   c.execute("INSERT INTO creative_reviews(id,client_id,title,status,created) VALUES(?,?,?,'direct',?)",(rid,cid,title,now))
  c.execute('INSERT INTO creative_versions VALUES(?,?,?,?,?,?,?,?)',(vid,rid,number,fids[0] if fids else None,caption,digest.hexdigest(),u['id'],now))
- for pos,fid in enumerate(fids):c.execute('INSERT INTO creative_assets VALUES(?,?,?)',(vid,fid,pos))
+ for pos,fid in enumerate(fids):c.execute('INSERT INTO creative_assets(version_id,file_id,position) VALUES(?,?,?)',(vid,fid,pos))
  c.execute('UPDATE creative_reviews SET current_version=?,title=? WHERE id=?',(vid,title,rid))
  status='draft' if mode=='draft' else 'scheduled'
  id=old['id'] if old else a.uid()

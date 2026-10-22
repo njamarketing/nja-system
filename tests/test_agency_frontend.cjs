@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm');
 const nodes=new Map();function node(key){if(!nodes.has(key))nodes.set(key,{innerHTML:'',value:key==='#editorial-month'?'2026-10':'',hidden:false,addEventListener(){},querySelector:()=>node('child'),querySelectorAll:()=>[],focus(){}});return nodes.get(key)}
 const sandbox={console,URL,URLSearchParams,Intl,Date,Set,Promise,Uint8Array,JSON,Number,String,Error,setTimeout:()=>{},clearTimeout,setInterval:()=>{},document:{querySelector:node,querySelectorAll:()=>[],addEventListener:()=>{}},navigator:{onLine:true},window:{addEventListener:()=>{},isSecureContext:false},location:{hash:'',search:''}};
 vm.createContext(sandbox);vm.runInContext(fs.readFileSync(__dirname+'/../static/app.js','utf8').replace(/bootstrap\(\);\s*$/,''),sandbox);vm.runInContext('function renderProfile(){};function enhanceButtons(){};',sandbox);
-for(const file of ['business','teamwork','agency','agency-production','agency-approvals','agency-editorial','agency-commercial','agency-finance','agency-calendar','agency-whatsapp','agency-ads'])vm.runInContext(fs.readFileSync(__dirname+'/../static/'+file+'.js','utf8'),sandbox);
+for(const file of ['business','teamwork','agency','agency-production','agency-approvals','approval-experience','agency-editorial','agency-commercial','agency-finance','agency-calendar','agency-whatsapp','agency-ads'])vm.runInContext(fs.readFileSync(__dirname+'/../static/'+file+'.js','utf8'),sandbox);
 vm.runInContext(`
 state.user={id:'master',name:'Master',master:true,permissions:[],branch:'foz',active:true};state.users=[state.user];state.company={branches:[{id:'foz',name:'Foz'},{id:'cascavel',name:'Cascavel'}]};state.tasks=[];state.clients=[{id:'c',name:'Cliente'}];
 const evil='<img src=x onerror=alert(1)>',root=$('#content');
@@ -12,5 +12,8 @@ renderAgencyReport({month:'2026-10',production:{done:0,deliverables:0,late:0,ext
 modal(evil,'test');if($('#modal-root').innerHTML.includes(evil))throw Error('Modal title XSS');
 state.user={id:'alice',master:false,permissions:['production']};const steps=tutorialSteps();if(!steps.some(s=>s.page==='production')||steps.some(s=>s.page==='agency_finance'))throw Error('Tutorial permissions');
 for(const page of ['agency_finance','editorial','commercial_ops'])if(navAllowed(page))throw Error('Forbidden navigation '+page);
+if(typeof window.approvalPostPreview!=='function')throw Error('Interactive approval preview missing');
+const preview=window.approvalPostPreview({client_id:'c',format:'carousel'},{caption:evil,files:[{id:'f',name:evil,mime:'image/jpeg',caption:evil}]},0);
+if(preview.includes(evil)||!preview.includes('&lt;img'))throw Error('Approval preview must escape captions and media labels');
 `,sandbox);
 console.log('OK: new modules render, escape user content, restrict navigation and tutorial.');

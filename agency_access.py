@@ -1,5 +1,6 @@
 """Client/team and branch boundaries shared by every agency module."""
 import json,time,os,sqlite3,shutil,secrets
+from contextlib import closing
 from pathlib import Path
 from datetime import datetime,timezone
 PERMISSIONS=['client_scope_manage','client_unit_all','client_company_all','operations','production','production_manage','approvals','approval_manage','portal_manage','editorial','editorial_manage','commercial_ops','commercial_manage','agency_reports','agency_finance','agency_finance_manage']
@@ -55,8 +56,8 @@ def backup(a):
  if not root:raise a.Error(409,'Configure NJA_BACKUP_DIR com um destino de backup separado da instalação.')
  folder=Path(root).expanduser().resolve()/('nja-'+datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')+'-'+secrets.token_hex(3));folder.mkdir(parents=True,mode=0o700)
  try:
-  with a.connect() as source,sqlite3.connect(folder/'nja.sqlite3') as target:source.backup(target)
-  with sqlite3.connect(folder/'nja.sqlite3') as check:
+  with a.connect() as source,closing(sqlite3.connect(folder/'nja.sqlite3')) as target:source.backup(target)
+  with closing(sqlite3.connect(folder/'nja.sqlite3')) as check:
    if check.execute('PRAGMA integrity_check').fetchone()[0]!='ok':raise RuntimeError('Integrity check failed')
   shutil.copytree(a.DATA/'uploads',folder/'uploads',ignore=shutil.ignore_patterns('.incoming-*'))
   if (a.DATA/'integration.key').exists():shutil.copy2(a.DATA/'integration.key',folder/'integration.key')

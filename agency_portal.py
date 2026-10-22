@@ -13,7 +13,10 @@ def init(c):
  CREATE TABLE IF NOT EXISTS portal_uploads(id TEXT PRIMARY KEY,client_id TEXT NOT NULL,account_id TEXT NOT NULL,name TEXT NOT NULL,mime TEXT NOT NULL,payload BLOB NOT NULL,created TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS portal_chat_messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,client_id TEXT NOT NULL REFERENCES clients(id),actor TEXT NOT NULL,name TEXT NOT NULL,text TEXT NOT NULL,created TEXT NOT NULL);
  CREATE INDEX IF NOT EXISTS portal_chat_client ON portal_chat_messages(client_id,seq);
+ CREATE TABLE IF NOT EXISTS review_uploads(file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,review_id TEXT NOT NULL REFERENCES creative_reviews(id) ON DELETE CASCADE);
  CREATE TABLE IF NOT EXISTS portal_shares(document_id TEXT PRIMARY KEY REFERENCES business_documents(id),client_id TEXT NOT NULL REFERENCES clients(id),created TEXT NOT NULL);''')
+ for table,column,definition in [('messages','portal_account_id','TEXT'),('messages','portal_name',"TEXT NOT NULL DEFAULT ''"),('creative_reviews','format',"TEXT NOT NULL DEFAULT 'post'")]:
+  if column not in [r[1] for r in c.execute('PRAGMA table_info('+table+')')]:c.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
 
 def review(a,c,u,id):
  r=c.execute('SELECT * FROM creative_reviews WHERE id=?',(id,)).fetchone()
@@ -22,7 +25,7 @@ def review(a,c,u,id):
 def serialize(c,r):
  d=dict(r);d['versions']=[]
  for v in c.execute('SELECT * FROM creative_versions WHERE review_id=? ORDER BY number DESC',(r['id'],)):
-  files=[{k:f[k] for k in ['id','name','mime','size']} for f in agency_editorial.assets(c,v)]
+  files=[{k:f[k] for k in ['id','name','mime','size']}|{'caption':f['asset_caption'] if 'asset_caption' in f.keys() else ''} for f in agency_editorial.assets(c,v)]
   d['versions'].append(dict(v)|{'file':files[0] if files else None,'files':files})
  d['feedback']=[dict(v) for v in c.execute('SELECT * FROM creative_feedback WHERE review_id=? ORDER BY created',(r['id'],))];return d
 
@@ -80,6 +83,37 @@ def chat(a,c,cid,actor,name,method,d,q):
   return {'messages':rows,'has_older':bool(rows and c.execute('SELECT 1 FROM portal_chat_messages WHERE client_id=? AND seq<? LIMIT 1',(cid,rows[0]['seq'])).fetchone())}
  raise a.Error(405,'Método não permitido.')
 
+def client_rooms(c,cid):
+ return [dict(r) for r in c.execute("SELECT id,name,photo,description,created FROM rooms WHERE client_id=? AND kind='group' ORDER BY created",(cid,))]
+
+def portal_room(a,c,cid,rid):
+ r=c.execute("SELECT * FROM rooms WHERE id=? AND client_id=? AND kind='group'",(rid,cid)).fetchone()
+ if not r:raise a.Error(404,'Grupo do cliente não encontrado.')
+ return r
+
+def portal_room_chat(a,c,p,rid,method,d,q):
+ room=portal_room(a,c,p['client_id'],rid)
+ if method=='POST':
+  tx=a.textfield(d,'text',True,5000);a.throttle(c,'portal-room:'+p['id'],60);mid=a.uid();stamp=a.now()
+  c.execute('INSERT INTO messages(id,room_id,user_id,text,created,portal_account_id,portal_name) VALUES(?,?,?,?,?,?,?)',(mid,rid,None,tx,stamp,p['id'],p['name']))
+  import interaction_updates
+  interaction_updates.prepare_receipts(c,rid,mid,'')
+  for member in c.execute('SELECT user_id FROM room_members WHERE room_id=?',(rid,)):a.notify(c,member[0],p['name']+' · Cliente',tx,'chats:'+rid,'messages')
+  return {'id':mid}
+ if method=='GET':
+  try:
+   before=int(q.get('before',['0'])[0]);after=int(q.get('after',['0'])[0])
+   if before<0 or after<0 or (before and after):raise ValueError()
+  except (ValueError,TypeError):raise a.Error(400,'Página inválida.')
+  where='m.room_id=?';params=[rid]
+  if before:where+=' AND m.rowid<?';params.append(before)
+  if after:where+=' AND m.rowid>?';params.append(after)
+  rows=[dict(r) for r in c.execute("SELECT m.rowid AS seq,m.id,m.user_id,m.text,m.created,COALESCE(u.name,m.portal_name,'Cliente') AS name,CASE WHEN m.portal_account_id IS NULL THEN 'staff' ELSE 'client' END AS side FROM messages m LEFT JOIN users u ON u.id=m.user_id WHERE "+where+' ORDER BY m.rowid '+('ASC' if after else 'DESC')+' LIMIT 100',params)]
+  if not after:rows.reverse()
+  older=bool(rows and c.execute('SELECT 1 FROM messages WHERE room_id=? AND rowid<? LIMIT 1',(rid,rows[0]['seq'])).fetchone())
+  return {'room':{'id':room['id'],'name':room['name']},'messages':rows,'has_older':older}
+ raise a.Error(405,'Método não permitido.')
+
 def api(a,c,u,method,path,d,q):
  if path=='/api/agency/client-chats' and method=='GET':
   a.need(u,'chats')
@@ -97,7 +131,9 @@ def api(a,c,u,method,path,d,q):
   if tid:
    t=a.get_task(c,u,tid)
    if t['client_id']!=cid:raise a.Error(400,'Tarefa de outro cliente.')
-  id=a.uid();c.execute('INSERT INTO creative_reviews(id,client_id,task_id,title,created) VALUES(?,?,?,?,?)',(id,cid,tid,a.textfield(d,'title',True,180),a.now()));a.audit(c,u,'creative_create',id);return {'id':id}
+  format=d.get('format','post')
+  if format not in ['post','image','carousel','reel','video']:raise a.Error(400,'Formato de apresentação inválido.')
+  id=a.uid();c.execute('INSERT INTO creative_reviews(id,client_id,task_id,title,format,created) VALUES(?,?,?,?,?,?)',(id,cid,tid,a.textfield(d,'title',True,180),format,a.now()));a.audit(c,u,'creative_create',id);return {'id':id}
  if path.startswith('/api/agency/reviews/'):
   parts=path.split('/');id=parts[4];r=review(a,c,u,id);a.need(u,'approvals')
   if len(parts)==5 and method=='GET':return serialize(c,r)
@@ -108,18 +144,30 @@ def api(a,c,u,method,path,d,q):
    if not c.in_transaction:c.execute('BEGIN IMMEDIATE')
    fids=d.get('file_ids') if 'file_ids' in d else ([d['file_id']] if d.get('file_id') else [])
    if not isinstance(fids,list) or len(fids)>10 or len(set(fids))!=len(fids):raise a.Error(400,'Selecione até 10 arquivos sem repetições.')
-   caption=a.textfield(d,'caption',False,10000);digest=hashlib.sha256()
+   caption=a.textfield(d,'caption',False,10000);captions=d.get('captions',['']*len(fids))
+   if not isinstance(captions,list) or len(captions)!=len(fids):raise a.Error(400,'Informe uma legenda para cada criativo.')
+   captions=[a.textfield({'caption':value},'caption',False,2200) for value in captions];digest=hashlib.sha256();files=[]
    for fid in fids:
     f=c.execute('SELECT * FROM files WHERE id=?',(fid,)).fetchone()
-    if not f or not f['task_id']:raise a.Error(400,'Selecione arquivos de tarefas deste cliente.')
-    task=a.get_task(c,u,f['task_id'])
-    if task['client_id']!=r['client_id']:raise a.Error(400,'Arquivo de outro cliente.')
+    if not f:raise a.Error(400,'Criativo não encontrado.')
+    allowed=False
+    if f['task_id']:
+     task=a.get_task(c,u,f['task_id']);allowed=task['client_id']==r['client_id']
+    if c.execute('SELECT 1 FROM review_uploads WHERE file_id=? AND review_id=?',(fid,id)).fetchone():allowed=True
+    if c.execute('SELECT 1 FROM editorial_uploads WHERE file_id=? AND client_id=?',(fid,r['client_id'])).fetchone():allowed=True
+    if not allowed:raise a.Error(400,'Arquivo de outro cliente ou projeto.')
+    files.append(f)
     with open(a.DATA/'uploads'/fid,'rb') as stream:
      for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
    if not fids and not caption:raise a.Error(400,'Adicione um arquivo ou texto para revisão.')
+   format=r.get('format','post')
+   if format=='image' and (len(files)!=1 or not files[0]['mime'].startswith('image/')):raise a.Error(400,'A publicação de imagem exige exatamente uma imagem.')
+   if format=='carousel' and (not 2<=len(files)<=10 or any(not f['mime'].startswith('image/') for f in files)):raise a.Error(400,'O carrossel exige de 2 a 10 imagens.')
+   if format in ['reel','video'] and (len(files)!=1 or files[0]['mime']!='video/mp4'):raise a.Error(400,'Reel ou vídeo exige exatamente um arquivo MP4.')
+   if any(captions):digest.update(b'\0assets\0'+json.dumps(captions,ensure_ascii=False,separators=(',',':')).encode())
    digest.update(b'\0'+caption.encode())
    idv=a.uid();number=c.execute('SELECT count(*)+1 FROM creative_versions WHERE review_id=?',(id,)).fetchone()[0];c.execute('INSERT INTO creative_versions VALUES(?,?,?,?,?,?,?,?)',(idv,id,number,fids[0] if fids else None,caption,digest.hexdigest(),u['id'],a.now()))
-   for pos,fid in enumerate(fids):c.execute('INSERT INTO creative_assets VALUES(?,?,?)',(idv,fid,pos))
+   for pos,fid in enumerate(fids):c.execute('INSERT INTO creative_assets(version_id,file_id,position,caption) VALUES(?,?,?,?)',(idv,fid,pos,captions[pos]))
    c.execute("UPDATE creative_reviews SET current_version=?,status='waiting' WHERE id=?",(idv,id));a.audit(c,u,'creative_version',id,str(number));return {'id':idv,'number':number}
   if action=='sharing' and method=='POST':
    a.need(u,'portal_manage')
@@ -178,11 +226,18 @@ def portal_api(a,c,environ,method,path,d,q):
   if not r or not r['password'] or not a.verify_password(a.textfield(d,'password',True,256),r['password']):raise a.Error(401,'Cliente, e-mail ou senha incorretos.')
   token=secrets.token_urlsafe(32);c.execute('INSERT INTO portal_sessions VALUES(?,?,?)',(a.digest(token),r['id'],time.time()+28800));return {'token':token,'name':r['name']}
  p=principal(a,c,environ);cid=p['client_id']
- if action=='chat':return chat(a,c,cid,'portal:'+p['id'],p['name'],method,d,q)
+ if action=='rooms' and method=='GET':return {'rooms':client_rooms(c,cid)}
+ if action.startswith('rooms/'):
+  parts=action.split('/')
+  if len(parts)==3 and parts[2]=='messages':return portal_room_chat(a,c,p,parts[1],method,d,q)
+ if action=='chat':
+  rooms=client_rooms(c,cid)
+  if not rooms:raise a.Error(404,'Nenhum grupo foi vinculado a este cliente.')
+  return portal_room_chat(a,c,p,rooms[0]['id'],method,d,q)
  if action=='logout' and method=='POST':c.execute('DELETE FROM portal_sessions WHERE token=?',(a.digest(environ.get('HTTP_X_PORTAL_TOKEN','')),));return {'ok':True}
  if action=='home' and method=='GET':
   client=c.execute('SELECT id,name,photo FROM clients WHERE id=?',(cid,)).fetchone()
-  return {'client':dict(client),'person':{'name':p['name'],'can_approve':bool(p['can_approve'])},'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
+  return {'client':dict(client),'person':{'name':p['name'],'can_approve':bool(p['can_approve'])},'rooms':client_rooms(c,cid),'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
  if action.startswith('reviews/'):
   id=action.split('/')[1];r=c.execute('SELECT * FROM creative_reviews WHERE id=? AND client_id=? AND shared=1',(id,cid)).fetchone()
   if not r:raise a.Error(404,'Material não compartilhado.')
@@ -199,6 +254,11 @@ def portal_api(a,c,environ,method,path,d,q):
   try:raw=base64.b64decode(d.get('data',''),validate=True)
   except Exception:raise a.Error(400,'Arquivo inválido.')
   if not 0<len(raw)<=8*1024*1024:raise a.Error(413,'Envie até 8 MB por arquivo.')
-  with tempfile.NamedTemporaryFile() as f:f.write(raw);f.flush();mime=attachments.identify(a,Path(f.name),name)
+  temporary=None
+  try:
+   with tempfile.NamedTemporaryFile(delete=False) as f:f.write(raw);temporary=Path(f.name)
+   mime=attachments.identify(a,temporary,name)
+  finally:
+   if temporary and temporary.exists():temporary.unlink()
   id=a.uid();c.execute('INSERT INTO portal_uploads VALUES(?,?,?,?,?,?,?)',(id,cid,p['id'],name,mime,raw,a.now()));return {'id':id}
  raise a.Error(404,'Recurso não encontrado no portal.')

@@ -34,8 +34,11 @@ def identify(a,path,name):
 
 def upload(a,c,u,q,stream,length):
     tid=q.get('task_id',[''])[0] or None;rid=q.get('room_id',[''])[0] or None
-    cid=q.get('editorial_client_id',[''])[0] or None
-    if sum(bool(x) for x in [tid,rid,cid])!=1:raise a.Error(400,'Selecione uma tarefa, conversa ou cliente editorial para o arquivo.')
+    cid=q.get('editorial_client_id',[''])[0] or None;review_id=q.get('review_id',[''])[0] or None
+    if sum(bool(x) for x in [tid,rid,cid,review_id])!=1:raise a.Error(400,'Selecione uma tarefa, conversa, cliente editorial ou revisão para o arquivo.')
+    if review_id:
+        import agency_portal
+        a.need(u,'approvals');a.need(u,'approval_manage');review=agency_portal.review(a,c,u,review_id)
     if cid:
         import agency_access
         a.need(u,'editorial');a.need(u,'editorial_manage');client=agency_access.need(a,c,u,cid)
@@ -57,7 +60,7 @@ def upload(a,c,u,q,stream,length):
                 if not block:raise a.Error(400,'O envio foi interrompido. Selecione o arquivo novamente.')
                 f.write(block);remaining-=len(block)
         mime=identify(a,temporary,name)
-        if cid:
+        if cid or review_id:
             if mime not in ['image/jpeg','image/png','image/webp','video/mp4']:raise a.Error(400,'Envie uma imagem JPG, PNG, WebP ou vídeo MP4.')
             if mime.startswith('image/'):
                 from PIL import Image,ImageOps
@@ -70,6 +73,7 @@ def upload(a,c,u,q,stream,length):
         os.replace(temporary,dest);temporary=None
         c.execute('INSERT INTO files VALUES(?,?,?,?,?,?,?,?)',(file_id,name,mime,length,u['id'],tid,rid,a.now()))
         if cid:c.execute('INSERT INTO editorial_uploads VALUES(?,?)',(file_id,cid))
+        if review_id:c.execute('INSERT INTO review_uploads VALUES(?,?)',(file_id,review_id))
         if rid:
             for member in c.execute('SELECT user_id FROM room_members WHERE room_id=? AND user_id<>?',(rid,u['id'])):a.notify(c,member[0],u['name'],'Enviou um material: '+name,'chats:'+rid,'messages')
         a.audit(c,u,'file_upload',file_id,name)

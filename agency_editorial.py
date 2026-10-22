@@ -10,13 +10,15 @@ def init(c):
  CREATE TABLE IF NOT EXISTS editorial_media(token TEXT PRIMARY KEY,post_id TEXT NOT NULL REFERENCES editorial_posts(id),file_id TEXT NOT NULL REFERENCES files(id),expires REAL NOT NULL);
  CREATE TABLE IF NOT EXISTS creative_assets(version_id TEXT NOT NULL REFERENCES creative_versions(id),file_id TEXT NOT NULL REFERENCES files(id),position INTEGER NOT NULL,PRIMARY KEY(version_id,file_id));''')
 
+ if 'caption' not in [r[1] for r in c.execute('PRAGMA table_info(creative_assets)')]:c.execute("ALTER TABLE creative_assets ADD COLUMN caption TEXT NOT NULL DEFAULT ''")
+
  if 'deleted' not in [r[1] for r in c.execute('PRAGMA table_info(social_accounts)')]:c.execute('ALTER TABLE social_accounts ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0')
  if 'source' not in [r[1] for r in c.execute('PRAGMA table_info(editorial_posts)')]:c.execute("ALTER TABLE editorial_posts ADD COLUMN source TEXT NOT NULL DEFAULT 'approval'")
  c.executescript('''CREATE TABLE IF NOT EXISTS editorial_uploads(file_id TEXT PRIMARY KEY REFERENCES files(id),client_id TEXT NOT NULL REFERENCES clients(id));
  CREATE TABLE IF NOT EXISTS editorial_submissions(nonce TEXT PRIMARY KEY,user_id TEXT NOT NULL,payload TEXT NOT NULL,post_id TEXT NOT NULL REFERENCES editorial_posts(id));''')
 
 def assets(c,v):
- rows=c.execute('SELECT f.* FROM creative_assets x JOIN files f ON f.id=x.file_id WHERE x.version_id=? ORDER BY x.position',(v['id'],)).fetchall()
+ rows=c.execute('SELECT f.*,x.caption AS asset_caption FROM creative_assets x JOIN files f ON f.id=x.file_id WHERE x.version_id=? ORDER BY x.position',(v['id'],)).fetchall()
  return rows or ([c.execute('SELECT * FROM files WHERE id=?',(v['file_id'],)).fetchone()] if v['file_id'] else [])
 def approved(a,c,p):
  v=c.execute('SELECT * FROM creative_versions WHERE id=?',(p['version_id'],)).fetchone();r=c.execute('SELECT * FROM creative_reviews WHERE id=?',(v['review_id'],)).fetchone()
@@ -28,6 +30,8 @@ def approved(a,c,p):
  for f in fs:
   with open(a.DATA/'uploads'/f['id'],'rb') as stream:
    for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+ captions=[f['asset_caption'] if 'asset_caption' in f.keys() else '' for f in fs]
+ if any(captions):digest.update(b'\0assets\0'+json.dumps(captions,ensure_ascii=False,separators=(',',':')).encode())
  digest.update(b'\0'+v['caption'].encode())
  if digest.hexdigest()!=v['sha256']:raise a.Error(409,'O conteúdo aprovado foi alterado. Envie uma nova versão.')
  if len(v['caption'])>2200:raise a.Error(400,'A legenda deve ter até 2.200 caracteres para publicação.')

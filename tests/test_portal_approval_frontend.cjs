@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+const context={console,window:{},URL:{revokeObjectURL(){},createObjectURL(){return 'blob:test'}},fetch:async()=>({ok:true,blob:async()=>({})}),FormData:class{},homeData:{client:{name:'Cliente <NJA>'},person:{can_approve:true},reviews:[]},root:{innerHTML:''},labels:{waiting:'Aguardando',approved:'Aprovado'},reviewRequest:0,urls:[],token:'test',api:async()=>({}),notice(){},esc,$:()=>({}),viewReview(){}};
+vm.createContext(context);vm.runInContext(fs.readFileSync(__dirname+'/../static/portal-approval.js','utf8'),context);
+assert.equal(typeof context.window.portalPublicationPreview,'function');
+const evil='<img src=x onerror=alert(1)>';
+const html=context.window.portalPublicationPreview({format:'carousel'},{caption:'Geral',files:[{name:evil,mime:'image/jpeg',preview:'/file.jpg',caption:evil},{name:'Segundo',mime:'image/jpeg',preview:'/file-2.jpg',caption:'Outro'}]},0);
+assert.ok(!html.includes(evil));assert.ok(html.includes('&lt;img'));assert.ok(html.includes('1/2'));assert.ok(html.includes('Legenda geral'));
+const reel=context.window.portalPublicationPreview({format:'reel'},{caption:'Vídeo',files:[{name:'reel.mp4',mime:'video/mp4',preview:'/reel.mp4',caption:''}]},0);
+assert.ok(reel.includes('<video'));assert.ok(reel.includes('Reels'));assert.ok(reel.includes('is-reel'));
+console.log('OK: client approval preview supports escaped carousel captions and Reel video.');

@@ -61,6 +61,7 @@ def api(a,c,u,method,path,d,q):
    for member in current-members:c.execute('DELETE FROM room_members WHERE room_id=? AND user_id=?',(id,member))
    for member in members:
     c.execute('INSERT OR IGNORE INTO room_members(room_id,user_id) VALUES(?,?)',(id,member));c.execute('UPDATE room_members SET is_manager=? WHERE room_id=? AND user_id=?',(int(member in managers),id,member))
+   if r['client_id']:c.execute('INSERT OR IGNORE INTO client_team SELECT ?,user_id FROM room_members WHERE room_id=?',(r['client_id'],id))
    for key in ['name','description','project']:
     if key in d:c.execute('UPDATE rooms SET '+key+'=? WHERE id=?',(a.textfield(d,key,key=='name',2000 if key=='description' else 120),id))
    a.audit(c,u,'group_settings',id);return {'ok':True}
@@ -68,6 +69,7 @@ def api(a,c,u,method,path,d,q):
    r=need_action(a,c,u,id,'invite')
    if r['kind']!='group':raise a.Error(400,'Convites disponíveis apenas em grupos personalizados.')
    for member in a.active_ids(c,d.get('members',[])):c.execute('INSERT OR IGNORE INTO room_members(room_id,user_id) VALUES(?,?)',(id,member))
+   if r['client_id']:c.execute('INSERT OR IGNORE INTO client_team SELECT ?,user_id FROM room_members WHERE room_id=?',(r['client_id'],id))
    a.audit(c,u,'group_invite',id);return {'ok':True}
   if len(parts)==5 and parts[4]=='messages' and method=='POST':need_action(a,c,u,id,'send')
  if path=='/api/sales' and method=='POST':

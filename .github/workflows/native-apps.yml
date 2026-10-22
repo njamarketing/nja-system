@@ -1,0 +1,114 @@
+name: Aplicativos Windows e Android
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - "v*"
+    paths:
+      - "packaging/**"
+      - "static/native-apps.*"
+      - "static/index.html"
+      - "static/sw.js"
+      - ".github/workflows/native-apps.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Gerar aplicativo Windows
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Preparar .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publicar executável independente
+        shell: pwsh
+        run: |
+          dotnet publish packaging/windows/NjaSystem.Windows.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            --output dist/windows
+          Copy-Item dist/windows/NJA-System-Windows.exe dist/NJA-System-Windows.exe
+          if (-not (Test-Path dist/NJA-System-Windows.exe)) { throw "Executável não encontrado" }
+
+      - name: Guardar aplicativo Windows
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: nja-windows
+          path: dist/NJA-System-Windows.exe
+          if-no-files-found: error
+
+  android:
+    name: Gerar aplicativo Android
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Preparar Java
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Preparar Gradle
+        uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
+        with:
+          gradle-version: "8.13"
+
+      - name: Gerar APK instalável
+        working-directory: packaging/android
+        run: gradle --no-daemon :app:assembleDebug
+
+      - name: Preparar APK para publicação
+        run: |
+          mkdir -p dist
+          cp packaging/android/app/build/outputs/apk/debug/app-debug.apk dist/NJA-System-Android.apk
+          test -s dist/NJA-System-Android.apk
+
+      - name: Guardar aplicativo Android
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: nja-android
+          path: dist/NJA-System-Android.apk
+          if-no-files-found: error
+
+  release:
+    name: Publicar downloads da versão
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - windows
+      - android
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Baixar os instaladores
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Criar release com downloads permanentes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/NJA-System-Windows.exe \
+            dist/NJA-System-Android.apk \
+            --verify-tag \
+            --title "NJA System $GITHUB_REF_NAME" \
+            --notes "Aplicativos oficiais do NJA System para Windows e Android. No Android, autorize a instalação de aplicativos externos quando o aparelho solicitar."

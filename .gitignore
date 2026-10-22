@@ -6,3 +6,9 @@ data/
 __pycache__/
 *.pyc
 nja-release-*.tar.gz
+
+packaging/windows/bin/
+packaging/windows/obj/
+packaging/android/.gradle/
+packaging/android/app/build/
+dist/

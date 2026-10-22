@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.NjaSystem" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/nja_background</item>
+        <item name="android:navigationBarColor">@color/nja_background</item>
+        <item name="android:statusBarColor">@color/nja_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>

@@ -19,6 +19,7 @@ class NativePackageTests(unittest.TestCase):
         for filename in ("NJA-System-Windows.exe", "NJA-System-Android.apk"):
             self.assertIn(f"/releases/latest/download/{filename}", javascript)
             self.assertIn(f"dist/{filename}", workflow)
+        self.assertIn('--repo "$GITHUB_REPOSITORY"', workflow)
 
     def test_android_manifest_is_secure_and_call_ready(self):
         manifest_path = ROOT / "packaging" / "android" / "app" / "src" / "main" / "AndroidManifest.xml"

@@ -106,9 +106,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" \
-            dist/NJA-System-Windows.exe \
-            dist/NJA-System-Android.apk \
-            --verify-tag \
-            --title "NJA System $GITHUB_REF_NAME" \
-            --notes "Aplicativos oficiais do NJA System para Windows e Android. No Android, autorize a instalação de aplicativos externos quando o aparelho solicitar."
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" \
+              dist/NJA-System-Windows.exe \
+              dist/NJA-System-Android.apk \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              dist/NJA-System-Windows.exe \
+              dist/NJA-System-Android.apk \
+              --verify-tag \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "NJA System $GITHUB_REF_NAME" \
+              --notes "Aplicativos oficiais do NJA System para Windows e Android. No Android, autorize a instalação de aplicativos externos quando o aparelho solicitar."
+          fi

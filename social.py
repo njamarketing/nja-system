@@ -84,7 +84,7 @@ def file_access(a,c,u,id):
     r=c.execute('SELECT * FROM social_assets WHERE file_id=?',(id,)).fetchone()
     if not r:return False
     if r['scope']=='client':
-        a.need(u,'clients')
+        if not any(a.perm(u,permission) for permission in ['clients','editorial']):a.need(u,'clients')
         if r['entity_id']:agency_access.need(a,c,u,r['entity_id'])
     else:a.need(u,'social')
     if r['expires'] and r['expires']<=a.now():raise a.Error(404,'História expirada.')

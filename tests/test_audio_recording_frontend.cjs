@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('node:fs'),assert=require('node:assert/strict'),path=require('node:path');
+const javascript=fs.readFileSync(path.join(__dirname,'..','static','enterprise.js'),'utf8');
+const css=fs.readFileSync(path.join(__dirname,'..','static','enterprise.css'),'utf8');
+assert.match(javascript,/b\.innerHTML=ic\('mic'\)/,'The recorder trigger must use the microphone icon.');
+assert.doesNotMatch(javascript,/b\.textContent='[●•]'/,'The old recording dot must not return.');
+assert.match(javascript,/createAnalyser\(\)/,'The waveform must react to microphone levels.');
+assert.match(javascript,/audio-record-waveform/);assert.match(javascript,/recordingClock/);
+assert.match(javascript,/stopRecordingVisuals\(\)/);assert.match(css,/\.audio-wave-bar/);assert.match(css,/safe-area-inset-bottom/);
+console.log('OK: microphone icon, reactive waveform, timer, cleanup and mobile safe area.');

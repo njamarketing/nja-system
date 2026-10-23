@@ -1,4 +1,4 @@
-import unittest,os,gc
+import unittest,os,gc,base64,io
 from unittest.mock import patch
 from datetime import datetime,timedelta,timezone
 import test_system as base
@@ -35,6 +35,20 @@ class EditorialTest(unittest.TestCase):
   with patch.object(agency_editorial,'graph',return_value={'id':'post123'}) as graph:agency_editorial.tick(app);agency_editorial.tick(app);self.assertEqual(graph.call_count,1)
   data=self.call('/api/agency/editorial')[1];self.assertNotIn('secret',data['accounts'][0]);self.assertEqual(data['posts'][0]['status'],'published')
   self.assertEqual(self.call('/api/agency/editorial',who='bob')[0],403)
+ def test_editorial_clients_include_registered_logo(self):
+  cid=self.call('/api/clients','POST',{'name':'Marca com logo','entered':'2026-10-01','product':'Marketing'})[1]['id']
+  from PIL import Image
+  out=io.BytesIO();Image.new('RGB',(20,20),'blue').save(out,format='PNG')
+  logo=self.call('/api/media','POST',{'scope':'client','data':base64.b64encode(out.getvalue()).decode()})[1]['id']
+  self.assertEqual(self.call('/api/clients/'+cid,'PATCH',{'photo':logo})[0],200)
+  client=next(item for item in self.call('/api/agency/editorial')[1]['clients'] if item['id']==cid)
+  self.assertEqual(client['photo'],logo)
+  self.call('/api/agency/access','POST',{'client_id':cid,'branch':'foz','members':['alice']})
+  with app.connect() as c:
+   c.execute('INSERT INTO roles VALUES(?,?,?)',('editorial-only','Editorial', '["editorial"]'))
+   c.execute("UPDATE users SET role_id='editorial-only' WHERE id='alice'")
+  self.assertEqual(self.call('/api/agency/editorial',who='alice')[0],200)
+  self.assertEqual(self.call('/files/'+logo,who='alice')[0],200)
  def test_ambiguous_response_no_retry(self):
   *_,pid=self.draft()
   with app.connect() as c:c.execute("UPDATE creative_reviews SET status='approved'");c.execute('UPDATE social_accounts SET verified=?',(app.now(),));c.execute("UPDATE editorial_posts SET status='scheduled',scheduled=?",(app.now(),))

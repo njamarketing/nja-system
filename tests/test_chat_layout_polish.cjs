@@ -1,0 +1,10 @@
+'use strict';
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict'),path=require('node:path');
+const source=fs.readFileSync(path.join(__dirname,'..','static','chat-layout-polish.js'),'utf8');
+const context={console,window:{},state:{notifications:[],rooms:[]},refreshMessages:async()=>{},refreshFloating:async()=>{},bindContent(){},bindProfileLinks(){},requestAnimationFrame:fn=>fn(),request:async()=>({}),updateBadge(){},route(){},toast(){},location:{hash:''},user:id=>({id,name:id}),avatar:()=>'<span class="avatar"></span>',initials:name=>name[0],esc:value=>String(value),$:()=>null,$$:()=>[]};
+vm.createContext(context);vm.runInContext(source,context);
+assert.deepEqual(JSON.parse(JSON.stringify(context.window.NJAChatPolish.groupFlags(['a','a','b','b','c']))),[{start:true,end:false},{start:false,end:true},{start:true,end:false},{start:false,end:true},{start:true,end:true}]);
+assert.match(source,/notice\.seen=1/);assert.match(source,/updateBadge\(\)/);assert.match(source,/message-person-photo/);
+const html=fs.readFileSync(path.join(__dirname,'..','static','index.html'),'utf8'),worker=fs.readFileSync(path.join(__dirname,'..','static','sw.js'),'utf8');
+assert.match(html,/chat-layout-polish\.css/);assert.match(html,/chat-layout-polish\.js/);assert.match(worker,/chat-layout-polish\.css/);assert.match(worker,/chat-layout-polish\.js/);
+console.log('OK: message grouping, profile photos and notification read state.');

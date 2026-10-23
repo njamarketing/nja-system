@@ -6,6 +6,7 @@ import agency_access
 import agency_production
 import workspace_updates
 import interaction_updates
+import collaboration_updates
 import agency_portal
 import agency_editorial
 import agency_commercial
@@ -111,6 +112,7 @@ CREATE INDEX IF NOT EXISTS ix_notifications_user ON notifications(user_id,create
         agency_ads.init(c)
         workspace_updates.init(c)
         interaction_updates.init(c)
+        collaboration_updates.init(c)
 
 def user_public(c,u):
     d=dict(u); d.pop('password',None); d['permissions']=PERMS if d['master'] else json.loads(c.execute('SELECT permissions FROM roles WHERE id=?',(d['role_id'],)).fetchone()[0]); d['preferences']=json.loads(d['preferences']); return d
@@ -165,7 +167,9 @@ def active_ids(c,ids):
 
 def task_access(c,u,t):
     if t['client_id'] and not agency_access.allowed(c,u,t['client_id']):return False
-    return perm(u,'task_all') or t['owner']==u['id'] or t['creator']==u['id'] or bool(c.execute('SELECT 1 FROM task_members WHERE task_id=? AND user_id=?',(t['id'],u['id'])).fetchone())
+    return (perm(u,'task_all') or t['owner']==u['id'] or t['creator']==u['id']
+            or bool(c.execute('SELECT 1 FROM task_members WHERE task_id=? AND user_id=?',(t['id'],u['id'])).fetchone())
+            or bool(t['client_project_id'] and c.execute('SELECT 1 FROM client_project_members WHERE project_id=? AND user_id=?',(t['client_project_id'],u['id'])).fetchone()))
 def get_task(c,u,id):
     need(u,'tasks'); t=c.execute('SELECT * FROM tasks WHERE id=?',(id,)).fetchone()
     if not t: raise Error(404,'Tarefa não encontrada.')
@@ -183,7 +187,12 @@ def task_json(c,t):
     d=dict(t)
     if d.get('client_id'):
         client=c.execute('SELECT name FROM clients WHERE id=?',(d['client_id'],)).fetchone()
-        if client:d['project']=client['name']
+        if client:
+            d['client_name']=client['name']
+            if not d.get('client_project_id'):d['project']=client['name']
+    if d.get('client_project_id'):
+        project=c.execute('SELECT name FROM client_projects WHERE id=?',(d['client_project_id'],)).fetchone()
+        if project:d['project']=project['name']
     d['checklist']=json.loads(d['checklist']);d['members']=[r[0] for r in c.execute('SELECT user_id FROM task_members WHERE task_id=?',(t['id'],))];return d
 
 def throttle(c,key,limit=10):
@@ -245,6 +254,8 @@ def api(c,environ,method,path,d,q):
         c.execute('UPDATE users SET last_seen=? WHERE id=?',(time.time(),u['id']))
         c.execute('UPDATE sessions SET last_seen=? WHERE token=?',(time.time(),digest(token)))
     extra=interaction_updates.api(sys.modules[__name__],c,u,method,path,d,q)
+    if extra is not None:return extra,headers
+    extra=collaboration_updates.api(sys.modules[__name__],c,u,method,path,d,q)
     if extra is not None:return extra,headers
     extra=workspace_updates.api(sys.modules[__name__],c,u,method,path,d,q)
     if extra is not None:return extra,headers
@@ -370,7 +381,8 @@ def api(c,environ,method,path,d,q):
         if priority not in ['low','normal','high','urgent']:raise Error(400,'Prioridade inválida.')
         parent=d.get('parent') or None
         if parent:get_task(c,u,parent)
-        id=uid();c.execute('INSERT INTO tasks(id,title,description,project,owner,creator,priority,start,due,parent,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',(id,title,textfield(d,'description',False,10000),textfield(d,'project',False,120),owner,u['id'],priority,start,due,parent,now(),now()))
+        client_id=d.get('client_id') or None;chosen_project=collaboration_updates.project(sys.modules[__name__],c,u,d.get('project_id'),client_id)
+        id=uid();c.execute('INSERT INTO tasks(id,title,description,project,owner,creator,priority,start,due,parent,created,updated,client_project_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',(id,title,textfield(d,'description',False,10000),chosen_project['name'] if chosen_project else textfield(d,'project',False,120),owner,u['id'],priority,start,due,parent,now(),now(),chosen_project['id'] if chosen_project else None))
         linked=enterprise.task_client(sys.modules[__name__],c,u,d)
         agency_access.task_members(sys.modules[__name__],c,linked.get('client_id'),[owner]+members)
         if linked:c.execute('UPDATE tasks SET '+','.join(k+'=?' for k in linked)+' WHERE id=?',list(linked.values())+[id])
@@ -389,10 +401,14 @@ def api(c,environ,method,path,d,q):
             return {'ok':True},headers
         if len(parts)==4 and method=='PATCH':
             fields={}
-            if any(k in d for k in ['title','description','project','client_id','start','due','priority','checklist']):need(u,'task_edit')
+            if any(k in d for k in ['title','description','project','project_id','client_id','start','due','priority','checklist']):need(u,'task_edit')
             for k in ['title','description','project']:
                 if k in d:fields[k]=textfield(d,k,k=='title',10000 if k=='description' else 180)
             fields.update(enterprise.task_client(sys.modules[__name__],c,u,d,t))
+            if 'project_id' in d:
+                selected=collaboration_updates.project(sys.modules[__name__],c,u,d.get('project_id'),fields.get('client_id',t['client_id']))
+                fields['client_project_id']=selected['id'] if selected else None
+                if selected:fields['project']=selected['name']
             for k in ['start','due']:
                 if k in d:fields[k]=datefield(d[k])
             if fields.get('start',t['start']) and fields.get('due',t['due']) and fields.get('due',t['due'])<fields.get('start',t['start']):raise Error(400,'Prazo anterior ao início.')
@@ -556,7 +572,9 @@ def api(c,environ,method,path,d,q):
         if not allowed or not endpoint.startswith('https://') or not isinstance(sub.get('keys'),dict) or not sub['keys'].get('auth') or not sub['keys'].get('p256dh'):raise Error(400,'Assinatura push inválida ou provedor não permitido.')
         c.execute('INSERT INTO subscriptions VALUES(?,?,?) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,subscription=excluded.subscription',(endpoint,u['id'],json.dumps(sub)));return {'ok':True},headers
     if path=='/api/push' and method=='DELETE':
-        c.execute('DELETE FROM subscriptions WHERE user_id=?',(u['id'],));return {'ok':True},headers
+        endpoint=d.get('endpoint','')
+        if endpoint:c.execute('DELETE FROM subscriptions WHERE user_id=? AND endpoint=?',(u['id'],endpoint))
+        return {'ok':True},headers
     if path=='/api/upload' and method=='POST':
         name=textfield(d,'name',True,180);tid=d.get('task_id');rid=d.get('room_id');photo=bool(d.get('photo'));room_photo=bool(d.get('room_photo'))
         if sum(bool(x) for x in [tid,rid,photo])!=1:raise Error(400,'Selecione um destino para o arquivo.')

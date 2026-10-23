@@ -41,6 +41,13 @@ def profile_fields(a,d):
     if fields.get('corporate_email') and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',fields['corporate_email']):raise a.Error(400,'E-mail corporativo inválido.')
     for key in ['birthday','hired']:
         if key in d:fields[key]=day(a,d,key)
+    for key in ['cover_x','cover_y','cover_zoom']:
+        if key in d:
+            try:value=int(d[key])
+            except (TypeError,ValueError):raise a.Error(400,'Ajuste de capa inválido.')
+            low,high=(100,220) if key=='cover_zoom' else (0,100)
+            if not low<=value<=high:raise a.Error(400,'Ajuste de capa fora do limite.')
+            fields[key]=value
     if 'career' in d:
         if not isinstance(d['career'],list) or len(d['career'])>60:raise a.Error(400,'Histórico inválido.')
         rows=[]
@@ -100,7 +107,7 @@ def api(a,c,u,method,path,d,q):
         if id!=u['id'] and not any(a.perm(u,k) for k in ['team','chats','social']):raise a.Error(403,'Sem acesso ao perfil.')
         row=c.execute('SELECT * FROM users WHERE id=? AND active=1',(id,)).fetchone()
         if not row:raise a.Error(404,'Perfil não encontrado.')
-        keys=['id','name','title','area','bio','photo','cover','birthday','thought','hired','corporate_email','created','active']
+        keys=['id','name','title','area','bio','photo','cover','cover_x','cover_y','cover_zoom','birthday','thought','hired','corporate_email','created','active']
         result={k:row[k] for k in keys};result['career']=json.loads(row['career']);result.update(presence(c,id));result['work_month']=month_seconds(a,c,id)
         return result
     if path.startswith('/api/tasks/') and path.endswith('/time'):

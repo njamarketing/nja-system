@@ -88,5 +88,25 @@ class ChatTest(unittest.TestCase):
   self.assertEqual(staff_signals[-1]['sender'],'portal:'+account)
   self.assertEqual(self.portal('meetings/'+mid+'/action','POST',{'action':'end'},token)[0],400)
 
+ def test_external_invite_creates_client_access_and_links_group(self):
+  created=self.call('/api/rooms','POST',{'kind':'group','name':'Projeto externo','members':['alice'],'external':{'name':'Maria Cliente','email':'maria@example.com','client_name':'Empresa Maria','product':'Plano inicial','can_approve':True}})
+  self.assertEqual(created[0],200,created[1]);rid=created[1]['id'];invite=created[1]['invitation']
+  self.assertTrue(invite['client_created']);self.assertEqual(invite['client_name'],'Empresa Maria')
+  cid=invite['client_id'];token=invite['url'].split('#invite=')[1]
+  with app.connect() as c:
+   room=c.execute('SELECT client_id,project FROM rooms WHERE id=?',(rid,)).fetchone();self.assertEqual((room['client_id'],room['project']),(cid,'Empresa Maria'))
+   client=c.execute('SELECT name,product,description FROM clients WHERE id=?',(cid,)).fetchone();self.assertEqual((client['name'],client['product']),('Empresa Maria','Plano inicial'));self.assertIn('contato externo',client['description'])
+   self.assertTrue(c.execute('SELECT 1 FROM client_team WHERE client_id=? AND user_id=?',(cid,'alice')).fetchone())
+  self.assertEqual(self.portal('activate','POST',{'token':token,'password':'Cliente-Seguro-123'})[0],200)
+  login=self.portal('login','POST',{'client_id':cid,'email':'maria@example.com','password':'Cliente-Seguro-123'});self.assertEqual(login[0],200,login[1])
+  rooms=self.portal('rooms',token=login[1]['token'])[1]['rooms'];self.assertEqual([(room['id'],room['name']) for room in rooms],[(rid,'Projeto externo')])
+
+ def test_existing_client_can_be_invited_from_group_settings(self):
+  cid=self.call('/api/clients','POST',{'name':'Cliente existente','entered':'2026-10-01','product':'Marketing'})[1]['id'];rid=self.group(cid)
+  invitation=self.call('/api/rooms/'+rid+'/external-invite','POST',{'name':'Contato Externo','email':'contato@example.com','can_approve':False})
+  self.assertEqual(invitation[0],200,invitation[1]);self.assertFalse(invitation[1]['client_created']);self.assertEqual(invitation[1]['client_id'],cid)
+  self.assertEqual(self.call('/api/rooms/general/external-invite','POST',{'name':'Contato','email':'x@example.com'})[0],400)
+  self.assertEqual(self.call('/api/rooms','POST',{'kind':'direct','members':['alice'],'external':{'name':'Contato','email':'x@example.com'}})[0],400)
+
 
 if __name__=='__main__':unittest.main()

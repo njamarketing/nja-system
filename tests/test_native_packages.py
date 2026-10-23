@@ -13,6 +13,14 @@ class NativePackageTests(unittest.TestCase):
         self.assertLess(html.index('/native-apps.js'), html.index('/meetings.js'))
         self.assertIn('/native-apps.css', html)
 
+    def test_people_picker_assets_load_last_and_are_available_offline(self):
+        html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+        worker = (ROOT / "static" / "sw.js").read_text(encoding="utf-8")
+        self.assertLess(html.index('/chat-experience.js'), html.index('/people-picker.js'))
+        for filename in ('people-picker.js', 'people-picker.css'):
+            self.assertIn('/'+filename, html)
+            self.assertIn("'/"+filename+"'", worker)
+
     def test_public_download_names_match_release_assets(self):
         javascript = (ROOT / "static" / "native-apps.js").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "native-apps.yml").read_text(encoding="utf-8")

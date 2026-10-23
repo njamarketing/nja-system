@@ -23,7 +23,7 @@ public partial class MainWindow : Window
             web.Settings.IsStatusBarEnabled = false;
             web.Settings.AreDefaultContextMenusEnabled = true;
             web.Settings.IsZoomControlEnabled = true;
-            web.Settings.UserAgent += " NJAWindows/1.18.6";
+            web.Settings.UserAgent += " NJAWindows/1.18.7";
             web.PermissionRequested += OnPermissionRequested;
             web.NewWindowRequested += OnNewWindowRequested;
             web.NavigationCompleted += (_, _) => LoadingPanel.Visibility = Visibility.Collapsed;

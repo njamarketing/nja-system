@@ -484,11 +484,14 @@ def api(c,environ,method,path,d,q):
             name='Conversa direta'
         elif kind=='group':need(u,'chat_manage');name=textfield(d,'name',True,120)
         else:raise Error(400,'Tipo inválido.')
+        if kind!='group' and d.get('external') is not None:raise Error(400,'Convites externos exigem uma conversa em grupo.')
         id=uid();c.execute('INSERT INTO rooms(id,name,kind,creator,created) VALUES(?,?,?,?,?)',(id,name,kind,u['id'],now()))
         if kind=='group':
             c.execute('UPDATE rooms SET project=?,description=? WHERE id=?',(textfield(d,'project',False,120),textfield(d,'description',False,2000),id))
         for m in set(members+[u['id']]):c.execute('INSERT INTO room_members(room_id,user_id) VALUES(?,?)',(id,m))
-        audit(c,u,'room_create',id,name);return {'id':id},headers
+        result={'id':id}
+        if kind=='group' and d.get('external') is not None:result['invitation']=agency_portal.invite_room_external(sys.modules[__name__],c,u,id,d['external'])
+        audit(c,u,'room_create',id,name);return result,headers
     if path.startswith('/api/rooms/'):
         parts=path.split('/');id=parts[3];room_access(c,u,id)
         if len(parts)==4 and method=='DELETE':

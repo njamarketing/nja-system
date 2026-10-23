@@ -1,7 +1,37 @@
 """Separate client identities; immutable versions and explicit sharing."""
 import base64,hashlib,json,re,secrets,time,tempfile
+from datetime import datetime
 from pathlib import Path
 import agency_access as scope,attachments,agency_editorial,meetings
+
+def create_portal_invite(a,c,u,cid,data):
+ email=a.textfield(data,'email',True,254).lower();name=a.textfield(data,'name',True,120)
+ if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):raise a.Error(400,'E-mail inválido.')
+ account=c.execute('SELECT id FROM portal_accounts WHERE client_id=? AND email=?',(cid,email)).fetchone();id=account[0] if account else a.uid()
+ if account:c.execute('UPDATE portal_accounts SET name=?,active=1,can_approve=? WHERE id=?',(name,int(data.get('can_approve') is True),id))
+ else:c.execute('INSERT INTO portal_accounts(id,client_id,email,name,can_approve) VALUES(?,?,?,?,?)',(id,cid,email,name,int(data.get('can_approve') is True)))
+ token=secrets.token_urlsafe(32);c.execute('DELETE FROM portal_invites WHERE account_id=?',(id,));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(id,));c.execute('INSERT INTO portal_invites VALUES(?,?,?)',(a.digest(token),id,time.time()+172800));a.audit(c,u,'portal_invite',id)
+ return {'url':a.ORIGIN+'/portal.html#invite='+token,'expires_hours':48,'account_id':id,'client_id':cid}
+
+def invite_room_external(a,c,u,rid,data):
+ a.need(u,'chats');a.need(u,'chat_manage');a.need(u,'portal_manage');a.need(u,'client_manage');a.room_access(c,u,rid)
+ room=c.execute('SELECT * FROM rooms WHERE id=?',(rid,)).fetchone()
+ if not room or room['kind']!='group':raise a.Error(400,'O convite externo está disponível somente em grupos.')
+ if not isinstance(data,dict):raise a.Error(400,'Dados do convite inválidos.')
+ cid=data.get('client_id') or room['client_id'];created=False
+ if cid:
+  client=scope.need(a,c,u,cid)
+  if not client.get('active',1):raise a.Error(409,'Reative o cliente antes de criar um acesso ao portal.')
+  if room['client_id'] and room['client_id']!=cid:raise a.Error(409,'Este grupo já pertence a outro cliente.')
+ else:
+  client_name=a.textfield(data,'client_name',False,120) or a.textfield(data,'name',True,120)
+  product=a.textfield(data,'product',False,240) or 'Cadastro inicial pelo convite do chat'
+  cid=a.uid();entered=str(datetime.now(a.TZ).date())
+  c.execute('INSERT INTO clients(id,name,entered,product,description,checklist,created) VALUES(?,?,?,?,?,?,?)',(cid,client_name,entered,product,'Cadastro inicial criado ao convidar um contato externo para a conversa.','[]',a.now()));scope.created(c,u,cid)
+  client=dict(c.execute('SELECT * FROM clients WHERE id=?',(cid,)).fetchone());created=True
+ c.execute('UPDATE rooms SET client_id=?,photo=?,cover=?,project=? WHERE id=?',(cid,client.get('photo'),client.get('cover'),client['name'],rid))
+ c.execute('INSERT OR IGNORE INTO client_team SELECT ?,user_id FROM room_members WHERE room_id=?',(cid,rid))
+ result=create_portal_invite(a,c,u,cid,data);result['client_created']=created;result['client_name']=client['name'];a.audit(c,u,'room_external_invite',rid,cid);return result
 
 def init(c):
  c.executescript('''CREATE TABLE IF NOT EXISTS portal_accounts(id TEXT PRIMARY KEY,client_id TEXT NOT NULL REFERENCES clients(id),email TEXT NOT NULL,name TEXT NOT NULL,password TEXT,active INTEGER NOT NULL DEFAULT 1,can_approve INTEGER NOT NULL DEFAULT 1,UNIQUE(client_id,email));
@@ -131,6 +161,10 @@ def portal_room_chat(a,c,p,rid,method,d,q):
  raise a.Error(405,'Método não permitido.')
 
 def api(a,c,u,method,path,d,q):
+ if path.startswith('/api/rooms/') and path.endswith('/external-invite') and method=='POST':
+  parts=path.split('/')
+  if len(parts)!=5:raise a.Error(404,'Conversa não encontrada.')
+  return invite_room_external(a,c,u,parts[3],d)
  if path=='/api/agency/client-chats' and method=='GET':
   a.need(u,'chats')
   return {'clients':[dict(r) for r in c.execute('SELECT id,name FROM clients WHERE active=1 ORDER BY name') if scope.allowed(c,u,r['id'])]}
@@ -193,10 +227,7 @@ def api(a,c,u,method,path,d,q):
    out=feedback(a,c,r,'staff:'+u['id'],u['name'],d,True);a.audit(c,u,'creative_decision',id,d.get('decision','comment'));return out
  if path=='/api/agency/portal/invite' and method=='POST':
   a.need(u,'portal_manage');cid=d.get('client_id');scope.need(a,c,u,cid);email=a.textfield(d,'email',True,254).lower();name=a.textfield(d,'name',True,120)
-  if not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+',email):raise a.Error(400,'E-mail inválido.')
-  account=c.execute('SELECT id FROM portal_accounts WHERE client_id=? AND email=?',(cid,email)).fetchone();id=account[0] if account else a.uid()
-  if not account:c.execute('INSERT INTO portal_accounts(id,client_id,email,name,can_approve) VALUES(?,?,?,?,?)',(id,cid,email,name,int(d.get('can_approve') is True)))
-  token=secrets.token_urlsafe(32);c.execute('DELETE FROM portal_invites WHERE account_id=?',(id,));c.execute('INSERT INTO portal_invites VALUES(?,?,?)',(a.digest(token),id,time.time()+172800));a.audit(c,u,'portal_invite',id);return {'url':a.ORIGIN+'/portal.html#invite='+token,'expires_hours':48}
+  return create_portal_invite(a,c,u,cid,{**d,'email':email,'name':name})
  if path.startswith('/api/agency/portal/accounts/') and method=='PATCH':
   a.need(u,'portal_manage');id=path.split('/')[-1];r=c.execute('SELECT * FROM portal_accounts WHERE id=?',(id,)).fetchone()
   if not r:raise a.Error(404,'Contato não encontrado.')

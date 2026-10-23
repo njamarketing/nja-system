@@ -8,6 +8,10 @@ android {
     namespace 'br.com.njamarketing.system'
     compileSdk 36
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId 'br.com.njamarketing.system'
         minSdk 26

@@ -29,6 +29,11 @@ def send_reset(origin,email,token):
     body=f'''<html lang="pt-BR"><body style="margin:0;background:#f1f5fa;font-family:Arial,sans-serif;color:#1a2940"><div style="max-width:560px;margin:30px auto;padding:32px;background:white;border-radius:16px"><h2 style="color:#1765d8">NJA System</h2><h1 style="font-size:24px">Recupere seu acesso</h1><p>Recebemos uma solicitação para criar uma nova senha.</p><p style="margin:28px 0"><a href="{html.escape(link,quote=True)}" style="background:#1765d8;color:white;padding:14px 22px;border-radius:8px;text-decoration:none">Criar nova senha</a></p><p>Este link expira em <strong>30 minutos</strong> e só pode ser usado uma vez.</p><p>Se você não solicitou a recuperação, ignore este e-mail. Sua senha continuará a mesma.</p><hr style="border:0;border-top:1px solid #e2e9f1"><small>NJA Consultoria &amp; Marketing · Sistema do Ninja</small></div></body></html>'''
     send(email,'Redefina sua senha — NJA System',plain,body)
 
+def send_portal_access(email,name,client,url):
+    plain=f'NJA System — acesso do cliente\n\nOlá, {name}. Um novo link de acesso foi criado para {client}:\n{url}\n\nO link é válido por 48 horas e pode ser usado uma vez.'
+    body=f'''<html lang="pt-BR"><body style="margin:0;background:#f1f5fa;font-family:Arial,sans-serif;color:#1a2940"><div style="max-width:560px;margin:30px auto;padding:32px;background:white;border-radius:16px"><h2 style="color:#1765d8">NJA System</h2><h1 style="font-size:24px">Seu acesso ao portal</h1><p>Olá, {html.escape(name)}. A equipe NJA criou um novo acesso para <strong>{html.escape(client)}</strong>.</p><p style="margin:28px 0"><a href="{html.escape(url,quote=True)}" style="background:#1765d8;color:white;padding:14px 22px;border-radius:8px;text-decoration:none">Criar nova senha</a></p><p>Este link expira em <strong>48 horas</strong> e pode ser usado uma vez.</p><hr style="border:0;border-top:1px solid #e2e9f1"><small>NJA Consultoria &amp; Marketing · Sistema do Ninja</small></div></body></html>'''
+    send(email,'Novo acesso ao Portal do Cliente — NJA System',plain,body)
+
 def api(a,c,u,method,path,d,q):
     if path not in ['/api/mail/status','/api/mail/test']:return None
     if not u['master']:raise a.Error(403,'Somente o master pode testar o envio de e-mail.')

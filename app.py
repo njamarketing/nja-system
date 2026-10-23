@@ -677,6 +677,11 @@ def application(environ,start_response):
                 person=agency_portal.principal(sys.modules[__name__],c,environ)
                 f=agency_portal.brand_file(sys.modules[__name__],c,person,path.split('/')[-1])
                 return attachments.download(sys.modules[__name__],f,environ,start_response,headers)
+        if path.startswith('/c/'):
+            if method!='GET':raise Error(404,'Convite não encontrado.')
+            token=path.removeprefix('/c/')
+            if not re.fullmatch(r'[a-z0-9-]{1,28}-[A-Za-z0-9_-]{10,16}',token):raise Error(404,'Convite não encontrado.')
+            return response(303,b'',mime='text/html; charset=utf-8',extra=[('Location','/portal.html#invite='+token),('Cache-Control','no-store')])
         if path.startswith('/files/'):
             if method not in ['GET','HEAD']:raise Error(404,'Arquivo não encontrado.')
             with connect() as c:

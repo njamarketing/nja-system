@@ -1,8 +1,21 @@
 """Separate client identities; immutable versions and explicit sharing."""
-import base64,hashlib,json,re,secrets,time,tempfile
+import base64,hashlib,json,re,secrets,time,tempfile,unicodedata
 from datetime import datetime
 from pathlib import Path
 import agency_access as scope,attachments,agency_editorial,meetings
+
+def client_code_base(name):
+ value=unicodedata.normalize('NFKD',name).encode('ascii','ignore').decode().lower()
+ return re.sub(r'[^a-z0-9]+','-',value).strip('-')[:28] or 'cliente'
+
+def ensure_client_code(c,cid):
+ client=c.execute('SELECT name,portal_code FROM clients WHERE id=?',(cid,)).fetchone()
+ if not client:return None
+ if client['portal_code']:return client['portal_code']
+ base=client_code_base(client['name']);code=base;number=2
+ while c.execute('SELECT 1 FROM clients WHERE lower(portal_code)=lower(?) AND id<>?',(code,cid)).fetchone():
+  suffix='-'+str(number);code=base[:28-len(suffix)]+suffix;number+=1
+ c.execute('UPDATE clients SET portal_code=? WHERE id=?',(code,cid));return code
 
 def create_portal_invite(a,c,u,cid,data):
  email=a.textfield(data,'email',True,254).lower();name=a.textfield(data,'name',True,120)
@@ -10,8 +23,8 @@ def create_portal_invite(a,c,u,cid,data):
  account=c.execute('SELECT id FROM portal_accounts WHERE client_id=? AND email=?',(cid,email)).fetchone();id=account[0] if account else a.uid()
  if account:c.execute('UPDATE portal_accounts SET name=?,active=1,can_approve=? WHERE id=?',(name,int(data.get('can_approve') is True),id))
  else:c.execute('INSERT INTO portal_accounts(id,client_id,email,name,can_approve) VALUES(?,?,?,?,?)',(id,cid,email,name,int(data.get('can_approve') is True)))
- token=secrets.token_urlsafe(32);c.execute('DELETE FROM portal_invites WHERE account_id=?',(id,));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(id,));c.execute('INSERT INTO portal_invites VALUES(?,?,?)',(a.digest(token),id,time.time()+172800));a.audit(c,u,'portal_invite',id)
- return {'url':a.ORIGIN+'/portal.html#invite='+token,'expires_hours':48,'account_id':id,'client_id':cid}
+ code=ensure_client_code(c,cid);token=code+'-'+secrets.token_urlsafe(8);c.execute('DELETE FROM portal_invites WHERE account_id=?',(id,));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(id,));c.execute('INSERT INTO portal_invites VALUES(?,?,?)',(a.digest(token),id,time.time()+172800));a.audit(c,u,'portal_invite',id)
+ return {'url':a.ORIGIN+'/c/'+token,'expires_hours':48,'account_id':id,'client_id':cid,'client_code':code}
 
 def invite_room_external(a,c,u,rid,data):
  a.need(u,'chats');a.need(u,'chat_manage');a.need(u,'portal_manage');a.need(u,'client_manage');a.room_access(c,u,rid)
@@ -47,6 +60,9 @@ def init(c):
  CREATE TABLE IF NOT EXISTS portal_shares(document_id TEXT PRIMARY KEY REFERENCES business_documents(id),client_id TEXT NOT NULL REFERENCES clients(id),created TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS meeting_portal_members(meeting_id TEXT REFERENCES meetings(id) ON DELETE CASCADE,account_id TEXT REFERENCES portal_accounts(id),status TEXT NOT NULL,joined REAL NOT NULL DEFAULT 0,invited REAL NOT NULL,PRIMARY KEY(meeting_id,account_id));
  CREATE INDEX IF NOT EXISTS ix_meeting_portal_account ON meeting_portal_members(account_id,meeting_id);''')
+ if 'portal_code' not in [r[1] for r in c.execute('PRAGMA table_info(clients)')]:c.execute('ALTER TABLE clients ADD COLUMN portal_code TEXT')
+ for client in c.execute('SELECT id FROM clients WHERE portal_code IS NULL OR trim(portal_code)=\'\'').fetchall():ensure_client_code(c,client['id'])
+ c.execute('DROP INDEX IF EXISTS ix_clients_portal_code');c.execute('CREATE UNIQUE INDEX ix_clients_portal_code ON clients(lower(portal_code)) WHERE portal_code IS NOT NULL')
  for table,column,definition in [('messages','portal_account_id','TEXT'),('messages','portal_name',"TEXT NOT NULL DEFAULT ''"),('creative_reviews','format',"TEXT NOT NULL DEFAULT 'post'")]:
   if column not in [r[1] for r in c.execute('PRAGMA table_info('+table+')')]:c.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' '+definition)
 
@@ -175,7 +191,7 @@ def api(a,c,u,method,path,d,q):
   if method=='POST':a.audit(c,u,'portal_chat_send',cid)
   return result
  if path=='/api/agency/reviews' and method=='GET':
-  a.need(u,'approvals');return {'items':[serialize(c,r) for r in c.execute("SELECT * FROM creative_reviews WHERE status<>'direct' ORDER BY created DESC") if scope.allowed(c,u,r['client_id'])],'accounts':[dict(r) for r in c.execute('SELECT id,client_id,email,name,active,can_approve FROM portal_accounts') if scope.allowed(c,u,r['client_id'])] if a.perm(u,'portal_manage') else [],'uploads':[{'id':r['id'],'name':r['name'],'client_id':r['client_id'],'created':r['created']} for r in c.execute('SELECT id,name,client_id,created FROM portal_uploads') if scope.allowed(c,u,r['client_id'])]}
+  a.need(u,'approvals');return {'items':[serialize(c,r) for r in c.execute("SELECT * FROM creative_reviews WHERE status<>'direct' ORDER BY created DESC") if scope.allowed(c,u,r['client_id'])],'accounts':[dict(r) for r in c.execute('SELECT p.id,p.client_id,p.email,p.name,p.active,p.can_approve,cl.portal_code AS client_code FROM portal_accounts p JOIN clients cl ON cl.id=p.client_id') if scope.allowed(c,u,r['client_id'])] if a.perm(u,'portal_manage') else [],'uploads':[{'id':r['id'],'name':r['name'],'client_id':r['client_id'],'created':r['created']} for r in c.execute('SELECT id,name,client_id,created FROM portal_uploads') if scope.allowed(c,u,r['client_id'])]}
  if path=='/api/agency/reviews' and method=='POST':
   a.need(u,'approvals');a.need(u,'approval_manage');cid=d.get('client_id');scope.need(a,c,u,cid);tid=d.get('task_id') or None
   if tid:
@@ -228,6 +244,25 @@ def api(a,c,u,method,path,d,q):
  if path=='/api/agency/portal/invite' and method=='POST':
   a.need(u,'portal_manage');cid=d.get('client_id');scope.need(a,c,u,cid);email=a.textfield(d,'email',True,254).lower();name=a.textfield(d,'name',True,120)
   return create_portal_invite(a,c,u,cid,{**d,'email':email,'name':name})
+ if path.startswith('/api/agency/portal/accounts/') and path.endswith('/reset') and method=='POST':
+  a.need(u,'portal_manage');parts=path.split('/');id=parts[-2];r=c.execute('SELECT * FROM portal_accounts WHERE id=?',(id,)).fetchone()
+  if not r:raise a.Error(404,'Contato não encontrado.')
+  client=scope.need(a,c,u,r['client_id']);mode=d.get('mode')
+  if mode=='password':
+   password=a.textfield(d,'password',True,256)
+   if len(password)<10:raise a.Error(400,'Use uma senha com pelo menos 10 caracteres.')
+   if d.get('confirmation')!=password:raise a.Error(400,'As senhas não coincidem.')
+   c.execute('UPDATE portal_accounts SET password=? WHERE id=?',(a.hash_password(password),id));c.execute('DELETE FROM portal_invites WHERE account_id=?',(id,));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(id,));a.audit(c,u,'portal_password_reset',id);return {'ok':True}
+  if mode in ['link','email']:
+   result=create_portal_invite(a,c,u,r['client_id'],{'email':r['email'],'name':r['name'],'can_approve':bool(r['can_approve'])})
+   if mode=='email':
+    import mailer
+    if not mailer.config()['ready']:raise a.Error(503,'O envio de e-mail ainda não está configurado. Gere o link e compartilhe manualmente.')
+    try:mailer.send_portal_access(r['email'],r['name'],client['name'],result['url'])
+    except Exception:raise a.Error(503,'Não foi possível enviar o e-mail. Gere o link e compartilhe manualmente.')
+    result['sent']=True
+   return result
+  raise a.Error(400,'Escolha como redefinir o acesso.')
  if path.startswith('/api/agency/portal/accounts/') and method=='PATCH':
   a.need(u,'portal_manage');id=path.split('/')[-1];r=c.execute('SELECT * FROM portal_accounts WHERE id=?',(id,)).fetchone()
   if not r:raise a.Error(404,'Contato não encontrado.')
@@ -266,12 +301,12 @@ def portal_api(a,c,environ,method,path,d,q):
   r=c.execute('SELECT p.* FROM portal_accounts p JOIN portal_invites i ON i.account_id=p.id WHERE i.token=? AND i.expires>? AND p.active=1',(token,time.time())).fetchone()
   if not r:raise a.Error(400,'Convite inválido ou expirado.')
   # Reinvites reset only this client's independent account and revoke existing sessions.
-  c.execute('UPDATE portal_accounts SET password=? WHERE id=?',(a.hash_password(p),r['id']));c.execute('DELETE FROM portal_invites WHERE account_id=?',(r['id'],));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(r['id'],));return {'client_id':r['client_id'],'email':r['email']}
+  code=ensure_client_code(c,r['client_id']);c.execute('UPDATE portal_accounts SET password=? WHERE id=?',(a.hash_password(p),r['id']));c.execute('DELETE FROM portal_invites WHERE account_id=?',(r['id'],));c.execute('DELETE FROM portal_sessions WHERE account_id=?',(r['id'],));return {'client_id':r['client_id'],'client_code':code,'email':r['email']}
  if action=='login' and method=='POST':
-  email=a.textfield(d,'email',True,254).lower();a.throttle(c,'portal-login:'+environ.get('REMOTE_ADDR',''),30);a.throttle(c,'portal-email:'+email)
-  r=c.execute('SELECT p.* FROM portal_accounts p JOIN clients cl ON cl.id=p.client_id WHERE p.client_id=? AND email=? AND p.active=1 AND cl.active=1',(d.get('client_id'),email)).fetchone()
+  email=a.textfield(d,'email',True,254).lower();client_code=a.textfield(d,'client_id',True,120).lower();a.throttle(c,'portal-login:'+environ.get('REMOTE_ADDR',''),30);a.throttle(c,'portal-email:'+email)
+  r=c.execute('SELECT p.*,cl.portal_code FROM portal_accounts p JOIN clients cl ON cl.id=p.client_id WHERE (p.client_id=? OR lower(cl.portal_code)=?) AND p.email=? AND p.active=1 AND cl.active=1',(client_code,client_code,email)).fetchone()
   if not r or not r['password'] or not a.verify_password(a.textfield(d,'password',True,256),r['password']):raise a.Error(401,'Cliente, e-mail ou senha incorretos.')
-  token=secrets.token_urlsafe(32);c.execute('INSERT INTO portal_sessions VALUES(?,?,?)',(a.digest(token),r['id'],time.time()+28800));return {'token':token,'name':r['name']}
+  token=secrets.token_urlsafe(32);c.execute('INSERT INTO portal_sessions VALUES(?,?,?)',(a.digest(token),r['id'],time.time()+28800));return {'token':token,'name':r['name'],'client_id':r['client_id'],'client_code':r['portal_code'] or ensure_client_code(c,r['client_id'])}
  p=principal(a,c,environ);cid=p['client_id']
  meeting_result=meetings.portal_api(a,c,p,method,action,d,q)
  if meeting_result is not None:return meeting_result
@@ -285,7 +320,7 @@ def portal_api(a,c,environ,method,path,d,q):
   return portal_room_chat(a,c,p,rooms[0]['id'],method,d,q)
  if action=='logout' and method=='POST':c.execute('DELETE FROM portal_sessions WHERE token=?',(a.digest(environ.get('HTTP_X_PORTAL_TOKEN','')),));return {'ok':True}
  if action=='home' and method=='GET':
-  client=c.execute('SELECT id,name,entered,product,description,photo,cover FROM clients WHERE id=?',(cid,)).fetchone()
+  client=c.execute('SELECT id,name,portal_code,entered,product,description,photo,cover FROM clients WHERE id=?',(cid,)).fetchone()
   plans=[]
   for plan in c.execute("SELECT id,name,items,start_month,end_month,active FROM service_plans WHERE client_id=? AND active=1 ORDER BY created DESC",(cid,)):
    value=dict(plan)

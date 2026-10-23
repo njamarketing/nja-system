@@ -9,6 +9,7 @@ class ChatTest(unittest.TestCase):
  call=base.PortalTest.call
  portal=base.PortalTest.portal
  setup_review=base.PortalTest.setup_review
+ invite_token=base.PortalTest.invite_token
 
  def group(self,cid,name='Grupo do cliente'):
   status,result,_=self.call('/api/rooms','POST',{'kind':'group','name':name,'members':['alice']})
@@ -92,7 +93,7 @@ class ChatTest(unittest.TestCase):
   created=self.call('/api/rooms','POST',{'kind':'group','name':'Projeto externo','members':['alice'],'external':{'name':'Maria Cliente','email':'maria@example.com','client_name':'Empresa Maria','product':'Plano inicial','can_approve':True}})
   self.assertEqual(created[0],200,created[1]);rid=created[1]['id'];invite=created[1]['invitation']
   self.assertTrue(invite['client_created']);self.assertEqual(invite['client_name'],'Empresa Maria')
-  cid=invite['client_id'];token=invite['url'].split('#invite=')[1]
+  cid=invite['client_id'];token=self.invite_token(invite['url'])
   with app.connect() as c:
    room=c.execute('SELECT client_id,project FROM rooms WHERE id=?',(rid,)).fetchone();self.assertEqual((room['client_id'],room['project']),(cid,'Empresa Maria'))
    client=c.execute('SELECT name,product,description FROM clients WHERE id=?',(cid,)).fetchone();self.assertEqual((client['name'],client['product']),('Empresa Maria','Plano inicial'));self.assertIn('contato externo',client['description'])

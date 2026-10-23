@@ -2,6 +2,8 @@ plugins {
     id 'com.android.application'
 }
 
+def releaseKeystore = System.getenv('ANDROID_KEYSTORE_PATH')
+
 android {
     namespace 'br.com.njamarketing.system'
     compileSdk 36
@@ -10,12 +12,24 @@ android {
         applicationId 'br.com.njamarketing.system'
         minSdk 26
         targetSdk 36
-        versionCode 11805
-        versionName '1.18.5'
+        versionCode 11806
+        versionName '1.18.6'
+    }
+
+    signingConfigs {
+        release {
+            if (releaseKeystore) {
+                storeFile file(releaseKeystore)
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

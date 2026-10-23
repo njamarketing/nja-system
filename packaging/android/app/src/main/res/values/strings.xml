@@ -3,4 +3,18 @@
     <string name="download_started">Download iniciado</string>
     <string name="file_picker_error">Não foi possível abrir o seletor de arquivos.</string>
     <string name="link_error">Não foi possível abrir este link.</string>
+    <string name="about_title">Sobre o aplicativo</string>
+    <string name="about_developer">Desenvolvido por NJA Marketing</string>
+    <string name="about_description">Seu espaço de trabalho NJA no Android, com conversas, chamadas e gestão em um só lugar.</string>
+    <string name="update_checking">Verificando a versão mais recente…</string>
+    <string name="update_current">Seu aplicativo está atualizado.</string>
+    <string name="update_available">Uma nova versão está disponível: %1$s</string>
+    <string name="update_failed">Não foi possível verificar agora. Confira sua conexão.</string>
+    <string name="update_check">Verificar atualização</string>
+    <string name="update_again">Verificar novamente</string>
+    <string name="update_now">Atualizar agora · %1$s</string>
+    <string name="update_downloading">Baixando atualização…</string>
+    <string name="update_downloaded">Download concluído. Confirme a instalação no Android.</string>
+    <string name="update_download_failed">Não foi possível baixar a atualização.</string>
+    <string name="version_label">Versão %1$s</string>
 </resources>

@@ -6,5 +6,10 @@
         <item name="android:navigationBarColor">@color/nja_background</item>
         <item name="android:statusBarColor">@color/nja_background</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    <style name="Theme.NjaSystem.About" parent="Theme.NjaSystem">
+        <item name="android:windowBackground">@drawable/about_background</item>
     </style>
 </resources>

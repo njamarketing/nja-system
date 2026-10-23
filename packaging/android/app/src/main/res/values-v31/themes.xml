@@ -1,0 +1,17 @@
+<resources>
+    <style name="Theme.NjaSystem" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowActionModeOverlay">true</item>
+        <item name="android:windowBackground">@color/nja_background</item>
+        <item name="android:navigationBarColor">@color/nja_background</item>
+        <item name="android:statusBarColor">@color/nja_background</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowSplashScreenBackground">@color/nja_background</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+    <style name="Theme.NjaSystem.About" parent="Theme.NjaSystem">
+        <item name="android:windowBackground">@drawable/about_background</item>
+    </style>
+</resources>

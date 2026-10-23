@@ -8,7 +8,7 @@
     <AssemblyName>NJA-System-Windows</AssemblyName>
     <RootNamespace>NjaSystem.Windows</RootNamespace>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.18.5</Version>
+    <Version>1.18.6</Version>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>

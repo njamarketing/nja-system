@@ -70,14 +70,31 @@ jobs:
           gradle-version: "8.13"
 
       - name: Gerar APK instalável
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/packaging/android/app/nja-release.p12
         working-directory: packaging/android
-        run: gradle --no-daemon :app:assembleDebug
+        run: |
+          set -Eeuo pipefail
+          test -n "$ANDROID_KEYSTORE_BASE64"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          test -n "$ANDROID_KEY_ALIAS"
+          test -n "$ANDROID_KEY_PASSWORD"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > app/nja-release.p12
+          gradle --no-daemon :app:assembleRelease
 
       - name: Preparar APK para publicação
         run: |
           mkdir -p dist
-          cp packaging/android/app/build/outputs/apk/debug/app-debug.apk dist/NJA-System-Android.apk
+          cp packaging/android/app/build/outputs/apk/release/app-release.apk dist/NJA-System-Android.apk
           test -s dist/NJA-System-Android.apk
+
+      - name: Remover chave temporária
+        if: always()
+        run: rm -f packaging/android/app/nja-release.p12
 
       - name: Guardar aplicativo Android
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

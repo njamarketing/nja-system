@@ -1,4 +1,7 @@
 <resources>
     <color name="nja_background">#101820</color>
     <color name="nja_blue">#168CCA</color>
+    <color name="nja_cyan">#24D8ED</color>
+    <color name="nja_text">#F4FAFF</color>
+    <color name="nja_muted">#9FB8CC</color>
 </resources>

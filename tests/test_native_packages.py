@@ -28,8 +28,27 @@ class NativePackageTests(unittest.TestCase):
         permissions = {item.attrib[f"{android}name"] for item in root.findall("uses-permission")}
         self.assertIn("android.permission.CAMERA", permissions)
         self.assertIn("android.permission.RECORD_AUDIO", permissions)
+        self.assertIn("android.permission.REQUEST_INSTALL_PACKAGES", permissions)
         application = root.find("application")
         self.assertEqual("false", application.attrib[f"{android}usesCleartextTraffic"])
+
+    def test_android_handles_safe_areas_and_native_updates(self):
+        main = (ROOT / "packaging" / "android" / "app" / "src" / "main" / "java" / "br" / "com" / "njamarketing" / "system" / "MainActivity.java").read_text(encoding="utf-8")
+        about = (ROOT / "packaging" / "android" / "app" / "src" / "main" / "java" / "br" / "com" / "njamarketing" / "system" / "AboutActivity.java").read_text(encoding="utf-8")
+        self.assertIn("WindowInsetsCompat.Type.systemBars()", main)
+        self.assertIn("WindowInsetsCompat.Type.displayCutout()", main)
+        self.assertIn("WindowInsetsCompat.Type.ime()", main)
+        self.assertIn("addJavascriptInterface", main)
+        self.assertIn("releases/latest", about)
+        self.assertIn("ACTION_MANAGE_UNKNOWN_APP_SOURCES", about)
+        self.assertIn("FileProvider.getUriForFile", about)
+
+    def test_android_release_uses_persistent_signing_secrets(self):
+        workflow = (ROOT / ".github" / "workflows" / "native-apps.yml").read_text(encoding="utf-8")
+        gradle = (ROOT / "packaging" / "android" / "app" / "build.gradle").read_text(encoding="utf-8")
+        self.assertIn("ANDROID_KEYSTORE_BASE64", workflow)
+        self.assertIn(":app:assembleRelease", workflow)
+        self.assertIn("signingConfig signingConfigs.release", gradle)
 
     def test_windows_package_targets_self_contained_x64(self):
         project = ET.parse(ROOT / "packaging" / "windows" / "NjaSystem.Windows.csproj").getroot()

@@ -13,7 +13,9 @@ Os links são permanentes: cada nova release substitui o arquivo entregue por `l
 
 O workflow `.github/workflows/native-apps.yml` compila os dois aplicativos. Em commits normais, os arquivos ficam como artefatos da execução. Ao publicar uma tag `v*`, os arquivos também são anexados à release do GitHub com os nomes esperados pelos botões do sistema.
 
-O executável Windows é independente do .NET instalado na máquina e usa o WebView2 presente nas versões atuais do Windows. O APK é instalável diretamente. Para distribuir futuramente pela Play Store, deve-se criar uma chave permanente de assinatura, guardá-la nos secrets do GitHub e gerar também um Android App Bundle (`.aab`).
+O executável Windows é independente do .NET instalado na máquina e usa o WebView2 presente nas versões atuais do Windows. O APK é assinado com a chave permanente guardada nos secrets do GitHub, permitindo que o próprio aplicativo baixe e instale versões futuras. O Android sempre apresenta sua confirmação de segurança antes de concluir a instalação. Para distribuir futuramente pela Play Store, também deve ser gerado um Android App Bundle (`.aab`).
+
+No Android, “Sobre o aplicativo” fica disponível no painel de downloads do login e do menu lateral. Essa tela mostra a versão instalada, o desenvolvedor e consulta a release mais recente. Quando encontra uma versão superior, o botão baixa o APK oficial e abre o instalador do sistema.
 
 ## Compilação local
 

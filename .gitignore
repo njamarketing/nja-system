@@ -11,4 +11,6 @@ packaging/windows/bin/
 packaging/windows/obj/
 packaging/android/.gradle/
 packaging/android/app/build/
+packaging/android/app/*.jks
+packaging/android/app/*.p12
 dist/

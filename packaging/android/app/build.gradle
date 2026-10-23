@@ -16,8 +16,8 @@ android {
         applicationId 'br.com.njamarketing.system'
         minSdk 26
         targetSdk 36
-        versionCode 11811
-        versionName '1.18.11'
+        versionCode 11812
+        versionName '1.18.12'
     }
 
     signingConfigs {

@@ -54,7 +54,7 @@ class SocialTest(unittest.TestCase):
   self.assertEqual(self.call(path,'POST',{'action':'manual','minutes':-1},who='alice')[0],400)
   self.assertEqual(self.call(path,who='bob')[0],403)
  def test_clients_onboarding_permissions_and_brand(self):
-  data={'name':'Cliente A','entered':'2026-10-14','product':'Assessoria','checklist':[{'text':'Briefing','done':False}]}
+  data={'name':'Cliente A','entered':'2026-10-14','services':['Assessoria','Tráfego pago'],'checklist':[{'text':'Briefing','done':False}]}
   self.assertEqual(self.call('/api/clients','POST',data,who='alice')[0],403)
   st,c,_=self.call('/api/clients','POST',data);self.assertEqual(st,200);cid=c['id']
   self.call('/api/agency/access','POST',{'client_id':cid,'branch':'foz','members':['alice']})
@@ -64,7 +64,11 @@ class SocialTest(unittest.TestCase):
   self.assertEqual(self.call('/api/rooms/'+rid+'/brand','PATCH',{'client_id':cid})[0],200)
   room=next(r for r in self.call('/api/rooms',who='alice')[1] if r['id']==rid)
   self.assertEqual(room['cover'],cover);self.assertEqual(room['client_id'],cid)
-  self.assertTrue(self.call('/api/clients',who='alice')[1][0]['checklist'][0]['done'])
+  client=self.call('/api/clients',who='alice')[1][0]
+  self.assertTrue(client['checklist'][0]['done']);self.assertEqual(client['services'],['Assessoria','Tráfego pago']);self.assertEqual(client['product'],'Assessoria')
+  self.assertEqual(self.call('/api/clients/'+cid,'PATCH',{'services':['Assessoria','Site institucional']})[0],200)
+  updated=self.call('/api/clients')[1][0];self.assertEqual(updated['services'],['Assessoria','Site institucional'])
+  self.assertEqual(self.call('/api/clients/'+cid,'PATCH',{'services':[]})[0],400)
   self.assertEqual(self.call('/api/clients/'+cid,'PATCH',{'product':'Outro'},who='alice')[0],403)
  def test_posts_images_likes_comments_delete_permissions(self):
   img=self.image('post')

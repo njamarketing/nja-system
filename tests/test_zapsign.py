@@ -28,8 +28,15 @@ class ZapSignTest(unittest.TestCase):
 
     def contract(self):
         today = datetime.now(app.TZ).date()
+        client = self.call('/api/clients', 'POST', {
+            'name': 'Cliente ZapSign',
+            'entered': today.isoformat(),
+            'services': ['Gestão de redes sociais', 'Vídeos'],
+        })[1]['id']
         result = self.call('/api/business/contracts', 'POST', {
+            'contract_number': 'NJA-ZAP-001',
             'title': 'Contrato integrado',
+            'client_id': client,
             'owner': 'master',
             'start': today.isoformat(),
             'expires': (today + timedelta(days=90)).isoformat(),
@@ -102,6 +109,8 @@ class ZapSignTest(unittest.TestCase):
         sent = provider.call_args.args[3]
         self.assertEqual(sent['signers'][0]['email'], 'cliente@example.com')
         self.assertIn({'key': 'nja_contract_id', 'value': contract_id}, sent['metadata'])
+        self.assertIn({'key': 'nja_contract_number', 'value': 'NJA-ZAP-001'}, sent['metadata'])
+        self.assertTrue(any(item['key'] == 'nja_client_id' for item in sent['metadata']))
         with app.connect() as connection:
             row = connection.execute(
                 'SELECT zapsign_token,zapsign_status FROM contracts WHERE id=?',
@@ -129,6 +138,19 @@ class ZapSignTest(unittest.TestCase):
                 )[0],
                 400,
             )
+        provider.assert_not_called()
+
+    @patch.dict(os.environ, {'ZAPSIGN_API_TOKEN': 'local-secret'}, clear=False)
+    def test_upload_requires_registered_contract_link(self):
+        data = {
+            'name': 'Contrato sem vínculo.pdf',
+            'base64_pdf': base64.b64encode(b'%PDF-1.4\ntest').decode(),
+            'signers': [{'name': 'Pessoa Cliente'}],
+        }
+        with patch.object(zapsign, 'provider') as provider:
+            status, payload, _ = self.call('/api/business/zapsign/documents', 'POST', data)
+        self.assertEqual(status, 400, payload)
+        self.assertIn('contrato NJA', payload['error'])
         provider.assert_not_called()
 
 

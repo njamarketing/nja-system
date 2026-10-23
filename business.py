@@ -20,6 +20,12 @@ def init(c):
  CREATE TABLE IF NOT EXISTS marketing_posts(id TEXT PRIMARY KEY,platform TEXT NOT NULL,text TEXT NOT NULL,image_url TEXT NOT NULL DEFAULT '',status TEXT NOT NULL DEFAULT 'draft',external_id TEXT NOT NULL DEFAULT '',container_id TEXT NOT NULL DEFAULT '',creator TEXT NOT NULL REFERENCES users(id),created TEXT NOT NULL,updated TEXT NOT NULL);
  CREATE TABLE IF NOT EXISTS connector_runs(provider TEXT PRIMARY KEY,updated TEXT NOT NULL,detail TEXT NOT NULL);
  ''')
+ contract_columns={r[1] for r in c.execute('PRAGMA table_info(contracts)')}
+ for name,definition in [('contract_number',"TEXT NOT NULL DEFAULT ''"),('services',"TEXT NOT NULL DEFAULT '[]'")]:
+  if name not in contract_columns:c.execute('ALTER TABLE contracts ADD COLUMN '+name+' '+definition)
+ for row in c.execute("SELECT id FROM contracts WHERE contract_number='' OR contract_number IS NULL").fetchall():
+  c.execute('UPDATE contracts SET contract_number=? WHERE id=?',('NJA-'+row['id'][:8].upper(),row['id']))
+ c.execute("CREATE UNIQUE INDEX IF NOT EXISTS contract_number_unique ON contracts(contract_number COLLATE NOCASE) WHERE contract_number<>''")
  # Sales is opt-in; no existing user gains new business permissions on migration.
  c.execute('INSERT OR IGNORE INTO roles VALUES(?,?,?)',('sales','Comercial',json.dumps(['dashboard','tasks','calendar','chats','team','notifications','task_create','task_edit','task_complete','clients','client_manage','crm','crm_edit','crm_reply','crm_convert'])))
  import zapsign
@@ -78,6 +84,30 @@ def client(a,c,u,id):
  a.need(u,'clients');agency_access.need(a,c,u,id)
  if not c.execute('SELECT 1 FROM clients WHERE id=?',(id,)).fetchone():raise a.Error(400,'Cliente inválido.')
  return id
+
+def service_names(a,raw,required=False):
+ if raw is None:
+  if required:raise a.Error(400,'Adicione ao menos um serviço contratado.')
+  return []
+ if not isinstance(raw,list):raise a.Error(400,'Serviços contratados inválidos.')
+ result=[]
+ for value in raw:
+  if not isinstance(value,str):raise a.Error(400,'Serviço contratado inválido.')
+  value=value.strip()
+  if not value:continue
+  if len(value)>160:raise a.Error(400,'Cada serviço deve ter até 160 caracteres.')
+  if value.casefold() not in {item.casefold() for item in result}:result.append(value)
+ if required and not result:raise a.Error(400,'Adicione ao menos um serviço contratado.')
+ if len(result)>30:raise a.Error(400,'Adicione no máximo 30 serviços contratados.')
+ return result
+
+def contract_number(a,c,value,current_id=None):
+ if not isinstance(value,str) or not value.strip():raise a.Error(400,'Informe o número do contrato.')
+ value=value.strip()
+ if len(value)>80:raise a.Error(400,'O número do contrato deve ter até 80 caracteres.')
+ found=c.execute('SELECT id FROM contracts WHERE contract_number=? COLLATE NOCASE',(value,)).fetchone()
+ if found and found['id']!=current_id:raise a.Error(409,'Já existe um contrato com esse número.')
+ return value
 
 def docmeta(c,scope,id):return [dict(r) for r in c.execute('SELECT id,name,created FROM business_documents WHERE scope=? AND entity_id=? ORDER BY created DESC',(scope,id))]
 
@@ -176,12 +206,30 @@ def api(a,c,u,method,path,d,q):
   if resource=='contracts':
    if not id and method=='GET':
     rows=[dict(r) for r in c.execute('SELECT * FROM contracts ORDER BY expires') if (a.perm(u,'contract_all') or r['owner']==u['id']) and agency_access.allowed(c,u,r['client_id'])]
-    for r in rows:r['documents']=docmeta(c,resource,r['id'])
+    for r in rows:
+     r['documents']=docmeta(c,resource,r['id'])
+     try:r['services']=json.loads(r.get('services') or '[]')
+     except (ValueError,TypeError):r['services']=[]
     return {'items':rows}
    if method in ['POST','PATCH'] and not action:
     a.need(u,'contract_manage');old=row or {};owner=d.get('owner',old.get('owner',u['id']));person(a,c,owner)
     if owner!=u['id']:a.need(u,'contract_all')
-    fields={k:a.textfield(d,k,k=='title',4000 if k=='notes' else 200) for k in ['title','notes']};fields.update(client_id=client(a,c,u,d.get('client_id')),owner=owner,start=day(a,d.get('start')),expires=day(a,d.get('expires')),renewal=day(a,d.get('renewal'),True),amount=money(a,d.get('amount',0)),status=d.get('status','active'),updated=a.now())
+    selected_client=d.get('client_id',old.get('client_id')) or None
+    if not selected_client:raise a.Error(400,'Vincule o contrato a um cliente.')
+    selected_client=client(a,c,u,selected_client)
+    raw_services=d.get('services')
+    if raw_services is None:
+     if id:
+      try:raw_services=json.loads(old.get('services') or '[]')
+      except (ValueError,TypeError):raw_services=[]
+     else:
+      client_row=c.execute('SELECT product,services FROM clients WHERE id=?',(selected_client,)).fetchone()
+      try:raw_services=json.loads(client_row['services'] or '[]')
+      except (ValueError,TypeError):raw_services=[]
+      if not raw_services and client_row['product']:raw_services=[client_row['product']]
+    services=service_names(a,raw_services,True)
+    fields={'title':a.textfield(d,'title',True,200) if 'title' in d or not id else old['title'],'notes':a.textfield(d,'notes',False,4000) if 'notes' in d or not id else old['notes']}
+    fields.update(contract_number=contract_number(a,c,d.get('contract_number',old.get('contract_number')),id),client_id=selected_client,services=json.dumps(services,ensure_ascii=False),owner=owner,start=day(a,d.get('start',old.get('start'))),expires=day(a,d.get('expires',old.get('expires'))),renewal=day(a,d.get('renewal',old.get('renewal')),True),amount=money(a,d.get('amount',old.get('amount',0)/100)),status=d.get('status',old.get('status','active')),updated=a.now())
     if fields['expires']<fields['start']:raise a.Error(400,'Vencimento anterior ao início.')
     if fields['status'] not in ['active','closed','cancelled']:raise a.Error(400,'Status inválido.')
     if id:

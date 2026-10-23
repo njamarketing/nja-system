@@ -15,8 +15,12 @@ const reminder=ui.reminderText({status:'active',expires:future});
 if(!reminder.includes('7 dia'))throw Error('Contract reminder countdown was not preserved');
 
 const source=fs.readFileSync(__dirname+'/../static/contracts-zapsign.js','utf8');
-for(const text of ['Criar documento','Contratos e lembretes','Modelos ZapSign','Sincronizar estados ZapSign']){
+for(const text of ['Enviar contrato para assinatura','Contrato NJA','Contratos e lembretes','Modelos ZapSign','Sincronizar estados ZapSign']){
  if(!source.includes(text))throw Error('Missing contract workspace feature: '+text);
 }
 if(source.includes('ZAPSIGN_API_TOKEN'))throw Error('API token reference leaked into frontend');
+const businessSource=fs.readFileSync(__dirname+'/../static/business.js','utf8');
+for(const text of ['Número do contrato','servicesEditor(services)','data.services=readServices'])if(!businessSource.includes(text))throw Error('Missing linked contract field: '+text);
+const socialSource=fs.readFileSync(__dirname+'/../static/social.js','utf8');
+for(const text of ['+ Adicionar serviço','d.services=readServices','Editar dados e serviços'])if(!socialSource.includes(text))throw Error('Missing multi-service client field: '+text);
 console.log('OK: ZapSign contracts UI, statuses, reminders and frontend secret isolation.');

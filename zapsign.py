@@ -178,8 +178,15 @@ def list_documents(a, q):
 
 
 def contract_link(c, token):
-    row = c.execute('SELECT id,title,client_id,start,expires,renewal,zapsign_status FROM contracts WHERE zapsign_token=?', (token,)).fetchone()
-    return dict(row) if row else None
+    row = c.execute('''SELECT co.id,co.contract_number,co.title,co.client_id,cl.name client_name,
+                      co.start,co.expires,co.renewal,co.services,co.zapsign_status
+                      FROM contracts co LEFT JOIN clients cl ON cl.id=co.client_id
+                      WHERE co.zapsign_token=?''', (token,)).fetchone()
+    if not row:return None
+    result=dict(row)
+    try:result['services']=json.loads(result.get('services') or '[]')
+    except (ValueError,TypeError):result['services']=[]
+    return result
 
 
 def prepare_signers(a, values):
@@ -246,17 +253,20 @@ def api(a, c, u, method, parts, d, q):
             if not raw.startswith(b'%PDF-') or len(raw) > 8 * 1024 * 1024:
                 raise a.Error(400, 'Envie um PDF válido de até 8 MB.')
             contract_id = d.get('contract_id') or None
-            client_id = d.get('client_id') or None
+            if not contract_id:
+                raise a.Error(400, 'Selecione o contrato NJA para vincular o documento ao cliente e ao número do contrato.')
             metadata = [{'key': 'nja_source', 'value': 'nja-system'}]
-            if contract_id:
-                import business
-                linked = business.access(a, c, u, 'contracts', contract_id)
-                client_id = linked.get('client_id') or client_id
-                metadata.append({'key': 'nja_contract_id', 'value': contract_id})
-            if client_id:
-                import business
-                business.client(a, c, u, client_id)
-                metadata.append({'key': 'nja_client_id', 'value': client_id})
+            import business
+            linked = business.access(a, c, u, 'contracts', contract_id)
+            client_id = linked.get('client_id')
+            if not client_id or not linked.get('contract_number'):
+                raise a.Error(409, 'Complete o cliente e o número no cadastro do contrato antes de enviar o PDF.')
+            business.client(a, c, u, client_id)
+            metadata.extend([
+                {'key': 'nja_contract_id', 'value': contract_id},
+                {'key': 'nja_contract_number', 'value': linked['contract_number']},
+                {'key': 'nja_client_id', 'value': client_id},
+            ])
             limit = d.get('date_limit_to_sign') or ''
             if limit:
                 import business
@@ -279,9 +289,8 @@ def api(a, c, u, method, parts, d, q):
             doc_token = created.get('token')
             if not isinstance(doc_token, str) or not TOKEN.fullmatch(doc_token):
                 raise a.Error(503, 'A ZapSign criou o documento sem retornar um identificador válido. Confira o painel.')
-            if contract_id:
-                c.execute('UPDATE contracts SET zapsign_token=?,zapsign_status=?,zapsign_updated=? WHERE id=?',
-                          (doc_token, created.get('status') or 'pending', a.now(), contract_id))
+            c.execute('UPDATE contracts SET zapsign_token=?,zapsign_status=?,zapsign_updated=? WHERE id=?',
+                      (doc_token, created.get('status') or 'pending', a.now(), contract_id))
             a.audit(c, u, 'zapsign_document_create', doc_token, name)
             return created
         if method in ('PATCH', 'PUT') and identifier:

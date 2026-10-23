@@ -320,14 +320,17 @@ def portal_api(a,c,environ,method,path,d,q):
   return portal_room_chat(a,c,p,rooms[0]['id'],method,d,q)
  if action=='logout' and method=='POST':c.execute('DELETE FROM portal_sessions WHERE token=?',(a.digest(environ.get('HTTP_X_PORTAL_TOKEN','')),));return {'ok':True}
  if action=='home' and method=='GET':
-  client=c.execute('SELECT id,name,portal_code,entered,product,description,photo,cover FROM clients WHERE id=?',(cid,)).fetchone()
+  client=dict(c.execute('SELECT id,name,portal_code,entered,product,services,description,photo,cover FROM clients WHERE id=?',(cid,)).fetchone())
+  try:client['services']=json.loads(client.get('services') or '[]')
+  except (ValueError,TypeError):client['services']=[]
+  if not client['services'] and client.get('product'):client['services']=[client['product']]
   plans=[]
   for plan in c.execute("SELECT id,name,items,start_month,end_month,active FROM service_plans WHERE client_id=? AND active=1 ORDER BY created DESC",(cid,)):
    value=dict(plan)
    try:value['items']=json.loads(value['items'])
    except (ValueError,TypeError):value['items']=[]
    plans.append(value)
-  return {'client':dict(client),'person':{'id':p['id'],'name':p['name'],'can_approve':bool(p['can_approve'])},'plan':plans[0] if plans else None,'plans':plans,'rooms':client_rooms(c,cid),'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
+  return {'client':client,'person':{'id':p['id'],'name':p['name'],'can_approve':bool(p['can_approve'])},'plan':plans[0] if plans else None,'plans':plans,'rooms':client_rooms(c,cid),'reviews':[serialize(c,r) for r in c.execute('SELECT * FROM creative_reviews WHERE client_id=? AND shared=1 ORDER BY created DESC',(cid,))],'projects':[{'id':r['id'],'title':r['title'],'month':r['month'],'total':c.execute('SELECT count(*) FROM deliverables WHERE project_id=?',(r['id'],)).fetchone()[0],'done':c.execute("SELECT count(*) FROM deliverables d JOIN tasks t ON t.id=d.task_id WHERE d.project_id=? AND t.status='done'",(r['id'],)).fetchone()[0]} for r in c.execute('SELECT * FROM agency_projects WHERE client_id=? ORDER BY month DESC',(cid,))],'documents':[dict(r) for r in c.execute('SELECT b.id,b.name,b.created FROM business_documents b JOIN portal_shares s ON s.document_id=b.id WHERE s.client_id=?',(cid,))]}
  if action.startswith('reviews/'):
   id=action.split('/')[1];r=c.execute('SELECT * FROM creative_reviews WHERE id=? AND client_id=? AND shared=1',(id,cid)).fetchone()
   if not r:raise a.Error(404,'Material não compartilhado.')

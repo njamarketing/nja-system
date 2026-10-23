@@ -52,9 +52,15 @@ class BusinessTest(unittest.TestCase):
   self.assertEqual(self.call('/api/business/invoices/'+id+'/pay','POST',{})[0],404)
   self.assertEqual(self.call('/api/business/invoices/'+id+'/documents','POST',{'name':'bad.pdf','data':base64.b64encode(b'html').decode()})[0],400)
  def test_contract_scope_and_reminder_dedup(self):
-  self.grant('alice',['contracts','contract_manage','contract_download']);self.grant('bob',['contracts','contract_manage'])
+  cid=self.call('/api/clients','POST',{'name':'Cliente contrato','entered':'2026-10-01','services':['Social media','Tráfego pago']})[1]['id']
+  self.call('/api/agency/access','POST',{'client_id':cid,'branch':'foz','members':['alice','master']})
+  self.grant('alice',['contracts','contract_manage','contract_download','clients']);self.grant('bob',['contracts','contract_manage'])
   today=datetime.now(app.TZ).date();expiry=(today+timedelta(days=7)).isoformat()
-  r=self.call('/api/business/contracts','POST',{'title':'Contrato A','owner':'alice','start':today.isoformat(),'expires':expiry,'amount':'1000'},who='alice');self.assertEqual(r[0],200,r);id=r[1]['id']
+  data={'contract_number':'NJA-2026-001','title':'Contrato A','client_id':cid,'owner':'alice','start':today.isoformat(),'expires':expiry,'amount':'1000','services':['Social media','Tráfego pago']}
+  r=self.call('/api/business/contracts','POST',data,who='alice');self.assertEqual(r[0],200,r);id=r[1]['id']
+  item=self.call('/api/business/contracts',who='alice')[1]['items'][0]
+  self.assertEqual(item['contract_number'],'NJA-2026-001');self.assertEqual(item['client_id'],cid);self.assertEqual(item['services'],data['services'])
+  duplicate=self.call('/api/business/contracts','POST',data|{'title':'Duplicado'},who='alice');self.assertEqual(duplicate[0],409)
   self.assertEqual(self.call('/api/business/contracts/'+id,'PATCH',{},who='bob')[0],403)
   with app.connect() as c:
    business.reminders(app,c);business.reminders(app,c)

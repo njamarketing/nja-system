@@ -19,6 +19,12 @@ CREATE TABLE IF NOT EXISTS social_assets(file_id TEXT PRIMARY KEY REFERENCES fil
 CREATE TABLE IF NOT EXISTS message_reactions(message_id TEXT REFERENCES messages(id),user_id TEXT REFERENCES users(id),emoji TEXT NOT NULL,PRIMARY KEY(message_id,user_id));
 CREATE TABLE IF NOT EXISTS social_schema(version INTEGER PRIMARY KEY);
 ''')
+    client_columns={r[1] for r in c.execute('PRAGMA table_info(clients)')}
+    if 'services' not in client_columns:
+        c.execute("ALTER TABLE clients ADD COLUMN services TEXT NOT NULL DEFAULT '[]'")
+    for row in c.execute("SELECT id,product,services FROM clients WHERE services='[]' OR services='' OR services IS NULL").fetchall():
+        if row['product']:
+            c.execute('UPDATE clients SET services=? WHERE id=?',(json.dumps([row['product']],ensure_ascii=False),row['id']))
     if not c.execute('SELECT 1 FROM social_schema WHERE version=1').fetchone():
         for r in c.execute('SELECT * FROM roles').fetchall():
             ps=json.loads(r['permissions'])
@@ -33,6 +39,31 @@ def day(a,d,key):
         try:date.fromisoformat(s)
         except ValueError:raise a.Error(400,'Data inválida: '+key)
     return s
+
+def client_services(a,d,current=None):
+    raw=d.get('services')
+    if raw is None:
+        product=d.get('product')
+        if product is None:return current or []
+        raw=[product]
+    if not isinstance(raw,list):raise a.Error(400,'Serviços contratados inválidos.')
+    result=[]
+    for value in raw:
+        if not isinstance(value,str):raise a.Error(400,'Serviço contratado inválido.')
+        value=value.strip()
+        if not value:continue
+        if len(value)>160:raise a.Error(400,'Cada serviço deve ter até 160 caracteres.')
+        if value.casefold() not in {item.casefold() for item in result}:result.append(value)
+    if not result:raise a.Error(400,'Adicione ao menos um serviço contratado.')
+    if len(result)>30:raise a.Error(400,'Adicione no máximo 30 serviços contratados.')
+    return result
+
+def client_json(row):
+    result=dict(row);result['checklist']=json.loads(result['checklist'])
+    try:result['services']=json.loads(result.get('services') or '[]')
+    except (ValueError,TypeError):result['services']=[]
+    if not result['services'] and result.get('product'):result['services']=[result['product']]
+    return result
 
 def profile_fields(a,d):
     fields={}
@@ -131,17 +162,26 @@ def api(a,c,u,method,path,d,q):
             a.audit(c,u,'task_time_'+action,tid);return {'ok':True}
     if path=='/api/clients':
         a.need(u,'clients')
-        if method=='GET':return [dict(r)|{'checklist':json.loads(r['checklist'])} for r in c.execute('SELECT * FROM clients ORDER BY name') if agency_access.allowed(c,u,r['id'])]
+        if method=='GET':return [client_json(r) for r in c.execute('SELECT * FROM clients ORDER BY name') if agency_access.allowed(c,u,r['id'])]
         if method=='POST':
             a.need(u,'client_manage');id=a.uid();entered=day(a,d,'entered')
             if not entered:raise a.Error(400,'Informe a data de entrada.')
-            c.execute('INSERT INTO clients(id,name,entered,product,description,checklist,created) VALUES(?,?,?,?,?,?,?)',(id,a.textfield(d,'name',True,120),entered,a.textfield(d,'product',True,240),a.textfield(d,'description',False,2000),json.dumps(checklist(a,d)),a.now()));agency_access.created(c,u,id);a.audit(c,u,'client_create',id);return {'id':id}
+            services=client_services(a,d)
+            c.execute('INSERT INTO clients(id,name,entered,product,services,description,checklist,created) VALUES(?,?,?,?,?,?,?,?)',(id,a.textfield(d,'name',True,120),entered,services[0],json.dumps(services,ensure_ascii=False),a.textfield(d,'description',False,2000),json.dumps(checklist(a,d)),a.now()));agency_access.created(c,u,id);a.audit(c,u,'client_create',id);return {'id':id}
     if path.startswith('/api/clients/') and method=='PATCH':
         a.need(u,'clients');a.need(u,'client_manage');id=path.split('/')[-1];agency_access.need(a,c,u,id)
         if not c.execute('SELECT 1 FROM clients WHERE id=?',(id,)).fetchone():raise a.Error(404,'Cliente não encontrado.')
         fields={}
         for k in ['name','product','description']:
             if k in d:fields[k]=a.textfield(d,k,k!='description',2000 if k=='description' else 240)
+        if 'services' in d:
+            services=client_services(a,d);fields['services']=json.dumps(services,ensure_ascii=False);fields['product']=services[0]
+        elif 'product' in fields:
+            current=c.execute('SELECT services FROM clients WHERE id=?',(id,)).fetchone()
+            try:existing=json.loads(current['services'] or '[]') if current else []
+            except (ValueError,TypeError):existing=[]
+            services=[fields['product']]+[service for service in existing if isinstance(service,str) and service.casefold()!=fields['product'].casefold()]
+            fields['services']=json.dumps(services,ensure_ascii=False)
         if 'entered' in d:
             fields['entered']=day(a,d,'entered')
             if not fields['entered']:raise a.Error(400,'Informe a data de entrada.')
